@@ -11,6 +11,19 @@ FM_WAKE_QUEUE_LOCK="${FM_WAKE_QUEUE_LOCK:-$STATE/.wake-queue.lock}"
 FM_LOCK_STALE_AFTER="${FM_LOCK_STALE_AFTER:-2}"
 mkdir -p "$STATE"
 
+# Git Bash/MSYS: ln -s COPIES by default, which breaks the symlink lock
+# protocol below (the copy fails readlink verification but keeps the lock
+# path occupied, deadlocking every contender). Force emulated symlinks for
+# the child ln/readlink calls; sys-file mode needs no Windows privileges.
+case "$(uname -s)" in
+  MINGW*|MSYS*)
+    case "${MSYS:-}" in
+      *winsymlinks*) ;;
+      '') export MSYS="winsymlinks:sys" ;;
+      *) export MSYS="$MSYS winsymlinks:sys" ;;
+    esac ;;
+esac
+
 fm_current_pid() {
   printf '%s\n' "${BASHPID:-$$}"
 }

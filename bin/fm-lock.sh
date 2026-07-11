@@ -17,6 +17,46 @@ mkdir -p "$STATE"
 # Known harness command names; extend when a new adapter is verified.
 HARNESS_RE='claude|codex|opencode|grok|^pi$'
 
+# Windows (Git Bash/MSYS): the native parent chain is invisible to MSYS ps
+# (the shell's PPID reads as 1), so walk it via PowerShell CIM instead.
+# Lock-file pids are then Windows pids; holder_alive falls back the same way.
+harness_pid_win() {
+  local pid=$$ ppid top wpid out
+  command -v powershell.exe >/dev/null 2>&1 || return 1
+  # Climb the MSYS side first: nested shells hit dead fork intermediates in
+  # the native chain, but the TOP MSYS ancestor's native parent is the live
+  # harness process.
+  top=$pid
+  while :; do
+    ppid=$(cat "/proc/$pid/ppid" 2>/dev/null) || break
+    [ -n "$ppid" ] && [ "$ppid" -gt 1 ] || break
+    pid=$ppid; top=$pid
+  done
+  wpid=$(cat "/proc/$top/winpid" 2>/dev/null) || return 1
+  out=$(FM_WPID="$wpid" FM_HARNESS_RE="$HARNESS_RE" powershell.exe -NoProfile -Command '
+    $id = [int]$env:FM_WPID
+    for ($i = 0; $i -lt 12 -and $id -gt 4; $i++) {
+      $p = Get-CimInstance Win32_Process -Filter "ProcessId=$id" -ErrorAction SilentlyContinue
+      if (-not $p) { exit 1 }
+      $n = $p.Name -replace "\.exe$",""
+      if ($n -match $env:FM_HARNESS_RE) { Write-Output $p.ProcessId; exit 0 }
+      if ($n -match "^(node|python[0-9.]*)$" -and $p.CommandLine -match $env:FM_HARNESS_RE) { Write-Output $p.ProcessId; exit 0 }
+      $id = $p.ParentProcessId
+    }
+    exit 1' 2>/dev/null | tr -d '\r ')
+  [ -n "$out" ] || return 1
+  echo "$out"
+}
+
+holder_alive_win() {  # true if $1 is a live WINDOWS pid that looks like a harness
+  local out
+  command -v powershell.exe >/dev/null 2>&1 || return 1
+  out=$(FM_WPID="$1" powershell.exe -NoProfile -Command '
+    $p = Get-CimInstance Win32_Process -Filter "ProcessId=$([int]$env:FM_WPID)" -ErrorAction SilentlyContinue
+    if ($p) { Write-Output (($p.Name -replace "\.exe$","") + " " + $p.CommandLine) }' 2>/dev/null | tr -d '\r')
+  [ -n "$out" ] && printf '%s' "$out" | grep -qE "$HARNESS_RE"
+}
+
 harness_pid() {
   local pid=$$ comm args
   for _ in 1 2 3 4 5 6 7 8; do
@@ -37,9 +77,10 @@ harness_pid() {
 
 holder_alive() {  # true if $1 is a live process that looks like a harness
   local pid=$1 comm
-  kill -0 "$pid" 2>/dev/null || return 1
-  comm=$(ps -o comm= -p "$pid" 2>/dev/null) || return 1
-  printf '%s' "$(basename "$comm") $(ps -o args= -p "$pid" 2>/dev/null)" | grep -qE "$HARNESS_RE"
+  if kill -0 "$pid" 2>/dev/null && comm=$(ps -o comm= -p "$pid" 2>/dev/null); then
+    printf '%s' "$(basename "$comm") $(ps -o args= -p "$pid" 2>/dev/null)" | grep -qE "$HARNESS_RE" && return 0
+  fi
+  holder_alive_win "$pid"
 }
 
 if [ "${1:-}" = "status" ]; then
@@ -49,7 +90,7 @@ if [ "${1:-}" = "status" ]; then
   exit 0
 fi
 
-me=$(harness_pid) || { echo "error: cannot locate harness process in ancestry" >&2; exit 1; }
+me=$(harness_pid) || me=$(harness_pid_win) || { echo "error: cannot locate harness process in ancestry" >&2; exit 1; }
 if [ -f "$LOCK" ]; then
   old=$(cat "$LOCK")
   if [ "$old" != "$me" ] && holder_alive "$old"; then
