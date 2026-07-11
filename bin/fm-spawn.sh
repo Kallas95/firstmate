@@ -1069,10 +1069,42 @@ fi
 # Export GOTMPDIR into the crewmate's pane shell so the agent and every child
 # process (go build, go test, ...) inherit it. Sent before the launch command so
 # the env is set when the agent starts; the brief sleep lets the export land.
-spawn_send_text_line "$T" "export GOTMPDIR=$TASK_TMP/gotmp"
-sleep 0.3
-spawn_send_literal "$T" "$LAUNCH"
-sleep 0.3
-spawn_send_key "$T" Enter
+#
+# Windows + herdr: the pane (and treehouse's PowerShell subshell) run PowerShell,
+# but GOTMPDIR export and the launch command are POSIX/bash (`export`, `VAR=val
+# cmd`, `"$(cat /c/...)"`), which PowerShell cannot run. Write the launch to a
+# script and invoke it through Git Bash via PowerShell's call operator:
+# `& '<bash.exe>' -l '<script>'`. A login shell (-l) gives the full MSYS PATH
+# (cat, claude, ...); the script cds into the worktree and exports GOTMPDIR
+# itself. Using a script file avoids any nested PowerShell/bash quoting - the
+# only PowerShell-quoted tokens are the bash.exe path and the script path, both
+# free of single quotes. The script lives under TASK_TMP, which teardown removes.
+launch_wrapped=0
+case "$(uname -s)" in
+  MINGW*|MSYS*)
+    if [ "$BACKEND" = herdr ]; then
+      LAUNCH_SH="$TASK_TMP/launch.sh"
+      {
+        printf 'cd %s\n' "$(shell_quote "$WT")"
+        printf 'export GOTMPDIR=%s\n' "$(shell_quote "$TASK_TMP/gotmp")"
+        printf '%s\n' "$LAUNCH"
+      } > "$LAUNCH_SH"
+      bash_win=$(cygpath -w "$(command -v bash)" 2>/dev/null || printf 'bash')
+      ps_bash=${bash_win//\'/\'\'}
+      ps_launch_sh=${LAUNCH_SH//\'/\'\'}
+      spawn_send_literal "$T" "& '$ps_bash' -l '$ps_launch_sh'"
+      sleep 0.3
+      spawn_send_key "$T" Enter
+      launch_wrapped=1
+    fi
+    ;;
+esac
+if [ "$launch_wrapped" = 0 ]; then
+  spawn_send_text_line "$T" "export GOTMPDIR=$TASK_TMP/gotmp"
+  sleep 0.3
+  spawn_send_literal "$T" "$LAUNCH"
+  sleep 0.3
+  spawn_send_key "$T" Enter
+fi
 
 echo "spawned $ID harness=$HARNESS kind=$KIND mode=$MODE yolo=$YOLO window=$META_WINDOW worktree=$WT"

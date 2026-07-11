@@ -908,6 +908,24 @@ The worktree-discovery poll compares `$p != $PROJ_ABS`; two different strings fo
 `fm-spawn.sh` prefixes `treehouse get` with a PowerShell `COMSPEC` set, scoped to `uname -s` MINGW/MSYS and `BACKEND=herdr`, so treehouse's subshell is herdr-trackable.
 Unit coverage: `tests/fm-backend-herdr.test.sh` `test_current_path_falls_back_to_cwd_on_windows` (foreground_cwd absent -> `.cwd`) alongside the existing `test_current_path_reads_cwd` (foreground_cwd present still wins).
 
+## Verified (2026-07-11, Windows): agent launch runs through Git Bash, not PowerShell
+
+Once worktree discovery was fixed (above), the spawn reached the launch step and failed differently: the herdr pane (and treehouse's PowerShell subshell) run **PowerShell**, but `fm-spawn.sh`'s launch is POSIX/bash - `export GOTMPDIR=...`, the `CLAUDE_CODE_ENABLE_PROMPT_SUGGESTION=false claude ...` env-prefix form, and `"$(cat '/c/.../brief.md')"`.
+PowerShell rejected all of it (`CLAUDE_CODE_ENABLE_PROMPT_SUGGESTION=false : n'est pas reconnu`; `Get-Content ...\c\Users\...` from the `/c/...` path), so the agent never started.
+Crewmate launch had therefore never worked end to end on this Windows home.
+
+**Fix.**
+On MINGW/MSYS + herdr, `fm-spawn.sh` writes the launch (a `cd` into the worktree, the `GOTMPDIR` export, then the normal `$LAUNCH`) to `TASK_TMP/launch.sh` and runs it through Git Bash via PowerShell's call operator: `& '<bash.exe>' -l '<launch.sh>'`.
+`-l` (login shell) is required so the agent inherits the full MSYS PATH (`cat`, `claude`, ...); `bash` is not on the pane's PowerShell PATH, so the absolute `cygpath -w` path to `bash.exe` is used.
+A script file is used rather than an inline `bash -lc '...'` specifically to avoid nested PowerShell/bash quoting: the launch contains single-quoted paths (`"$(cat '/c/.../brief.md')"`), and PowerShell single-quote doubling of that inline was verified to corrupt the command (`unexpected EOF while looking for matching ')'`); the only PowerShell-quoted tokens with the script approach are the bash and script paths, neither of which contains a quote.
+`TASK_TMP` is removed by teardown, so the script needs no separate cleanup.
+
+Verified end to end: `& 'C:\Program Files\Git\usr\bin\bash.exe' -l '/tmp/fm-<id>/launch.sh'` from the PowerShell pane launched Claude Code (`[Fable 5] | scrapmax`, bypass-permissions on) in the worktree, with `cat`/`claude` resolved and `GOTMPDIR` set.
+
+**Follow-up rough edges (Windows, not yet fixed - operational workarounds only):**
+- **First launch in a fresh pool worktree shows Claude's folder-trust dialog, which consumes the initial brief prompt.** Accepting the dialog leaves an empty composer instead of a running brief; the brief must be re-sent. Subsequent spawns in the same (now-trusted) pool worktree do not show it. Candidate fix: pre-trust the treehouse pool root, or have supervision re-send the brief when the post-dialog composer is empty.
+- **`fm-send.sh` stages text into the herdr pane composer but the submit Enter does not land**, so a steer sits unsent until a manual `herdr pane send-keys <pane> enter`. Likely the same composer-submit plumbing the tmux path handles via cursor-row retry; the herdr Windows path needs the equivalent.
+
 ## Known gaps and follow-up notes
 
 - **RESOLVED: worktree-discovery isolation guard's symlinked-project-prefix false refusal.** Originally discovered while building the runtime-backend-auto-detection real smoke test (`tests/fm-backend-autodetect-smoke.test.sh`), which needed a scratch project.
