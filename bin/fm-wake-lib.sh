@@ -41,10 +41,23 @@ fm_pid_identity() {
   case "$pid" in
     ''|*[!0-9]*) return 1 ;;
   esac
-  # Pin LC_ALL=C so lstart's date format is locale-invariant: the identity is
-  # written under one locale but re-read under the machine's ambient locale, which
-  # would otherwise mismatch on a non-C locale (e.g. ko_KR) and reject a live watcher.
-  out=$(LC_ALL=C ps -p "$pid" -o lstart= -o command= 2>/dev/null) || return 1
+  case "$(uname -s)" in
+    MINGW*|MSYS*)
+      # MSYS ps (BusyBox-style) rejects -o, so the Unix `lstart+command` query
+      # returns nothing and the identity would be empty - which makes the watcher
+      # lock unverifiable and the turn-end guard block forever. Parse the default
+      # `ps -p` columns instead: WINPID ($4) + STIME ($7) + COMMAND ($8..) is a
+      # stable per-instance signature that changes on pid reuse, the same
+      # guarantee lstart+command gives on Unix.
+      out=$(ps -p "$pid" 2>/dev/null | awk 'NR==2{cmd=""; for(i=8;i<=NF;i++) cmd=cmd (i>8?" ":"") $i; print $4, $7, cmd}')
+      ;;
+    *)
+      # Pin LC_ALL=C so lstart's date format is locale-invariant: the identity is
+      # written under one locale but re-read under the machine's ambient locale, which
+      # would otherwise mismatch on a non-C locale (e.g. ko_KR) and reject a live watcher.
+      out=$(LC_ALL=C ps -p "$pid" -o lstart= -o command= 2>/dev/null) || return 1
+      ;;
+  esac
   [ -n "$out" ] || return 1
   printf '%s\n' "$out" | sed 's/^[[:space:]]*//'
 }
