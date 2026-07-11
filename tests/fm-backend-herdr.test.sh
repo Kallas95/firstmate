@@ -767,6 +767,21 @@ test_current_path_reads_cwd() {
   pass "fm_backend_herdr_current_path: reads pane foreground_cwd (the live running process), not the frozen creation-time cwd"
 }
 
+test_current_path_falls_back_to_cwd_on_windows() {
+  local dir log resp fb out
+  dir="$TMP_ROOT/cwd-win"; mkdir -p "$dir/responses"; log="$dir/log"; resp="$dir/responses"; : > "$log"
+  # Windows (Git Bash/MSYS): herdr does NOT populate foreground_cwd - the field is
+  # absent from pane get. There, .cwd DOES track the live cwd via PowerShell's
+  # OSC 7 report, so current_path must fall back to .cwd to recover the treehouse
+  # worktree path. Verified 2026-07-11; see docs/herdr-backend.md.
+  printf '{"result":{"pane":{"cwd":"/tmp/win-worktree"}}}\n' > "$resp/1.out"
+  fb=$(make_herdr_fakebin "$dir")
+  out=$( PATH="$fb:$PATH" FM_HERDR_LOG="$log" FM_HERDR_RESPONSES="$resp" \
+    bash -c '. "$0/bin/backends/herdr.sh"; fm_backend_herdr_current_path default:w1:p2' "$ROOT" )
+  [ "$out" = "/tmp/win-worktree" ] || fail "current_path should fall back to .cwd when foreground_cwd is absent (Windows), got '$out'"
+  pass "fm_backend_herdr_current_path: falls back to .cwd when foreground_cwd is absent (Windows)"
+}
+
 # --- busy_state (semantic agent state) ---------------------------------------
 
 test_busy_state_working_maps_to_busy() {
@@ -2080,6 +2095,7 @@ test_capture_preserves_pane_read_failure
 test_send_key_normalizes_and_targets_pane
 test_kill_is_best_effort
 test_current_path_reads_cwd
+test_current_path_falls_back_to_cwd_on_windows
 test_busy_state_working_maps_to_busy
 test_busy_state_done_and_blocked_map_to_idle
 test_busy_state_unknown_on_no_agent

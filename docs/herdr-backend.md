@@ -868,6 +868,46 @@ On entry the launcher drops the prior session's artifacts when the daemon is not
 This never drops a genuinely-pending escalation: the durable record is `state/.wake-queue` plus each crew's `state/<id>.status`, and any still-true condition is re-escalated by the daemon's heartbeat catch-all scan.
 Covered by the unit cases in `tests/fm-afk-launch.test.sh` (clear-on-fresh-entry vs refresh, and the stop ordering asserting the daemon saw `state/.afk` present at SIGTERM).
 
+## Verified (2026-07-11, Windows): worktree-discovery needs a PowerShell subshell + a `.cwd` fallback
+
+On Windows (Git Bash/MSYS, herdr client 0.7.1), every crewmate spawn failed with `error: treehouse get did not enter a worktree within 60s`.
+Two Windows-specific facts, both verified live against a real treehouse acquisition, combine to break the worktree-discovery poll, and both fixes are needed together.
+
+**Fact 1: herdr does not populate `foreground_cwd` on Windows.**
+`herdr pane get <pane>` returns no `foreground_cwd` field at all (not stale - absent), so `fm_backend_herdr_current_path`'s `foreground_cwd`-only read returned empty forever and the poll timed out.
+Exact evidence, a pane sitting inside a treehouse subshell:
+
+```
+$ herdr pane get w1:pH | jq '{cwd, foreground_cwd, keys: keys}'
+cwd: C:\Users\maxim\dev\projects\firstmate\projects\scrapmax
+foreground_cwd: None
+keys: ['agent_status','cwd','focused','pane_id','revision','tab_id','terminal_id','workspace_id']
+```
+
+**Fact 2: on Windows, `.cwd` DOES update live (the opposite of Unix), but only for a PowerShell subshell.**
+Unlike Unix (where `.cwd` is frozen at pane creation - see "Verified CLI facts"), on Windows `.cwd` tracks the live cwd via PowerShell's OSC 7 report.
+But `treehouse get`'s default subshell is `cmd.exe` (via `COMSPEC`), which emits no OSC 7, so `.cwd` stays frozen under it.
+Pointing `COMSPEC` at PowerShell makes treehouse open a PowerShell subshell whose `cd` into the worktree updates `.cwd`.
+Verified end to end in a throwaway pane:
+
+```
+$ herdr pane run <pane> 'Set-Location <project>'                 # PowerShell, herdr-tracked
+$ herdr pane get <pane> | jq -r .result.pane.cwd                  # -> <project>   (.cwd IS live on Windows)
+$ herdr pane run <pane> '$env:COMSPEC="...powershell.exe"; treehouse get'
+$ herdr pane get <pane> | jq -r .result.pane.cwd                  # -> C:\Users\maxim\.treehouse\...\scrapmax  (subshell tracked)
+# pane buffer shows a "Windows PowerShell" banner + `PS ...worktree>` prompt, NOT the cmd.exe banner; `exit` still returns the worktree.
+```
+
+**Fact 3: herdr reports a Windows-format path, but `PROJ_ABS` is an MSYS path.**
+`.cwd` (and `foreground_cwd` where present) come back as `C:\Users\maxim\...`, while `fm-spawn.sh`'s `PROJ_ABS` is the MSYS `cd && pwd` form `/c/Users/maxim/...`.
+The worktree-discovery poll compares `$p != $PROJ_ABS`; two different strings for the identical directory make that ALWAYS true, so with Facts 1-2 fixed the poll broke on its FIRST read - before treehouse had entered - handing `validate_spawn_worktree` the project dir itself, which it then correctly refused as "not isolated" (`resolved '...\projects\scrapmax'` == primary).
+`cygpath -u 'C:\Users\maxim\.treehouse\...\scrapmax'` -> `/c/Users/maxim/.treehouse/.../scrapmax`; `cygpath -u '/tmp/x'` -> `/tmp/x` (POSIX passthrough, so the fix is inert off Windows and in the POSIX-path unit tests).
+
+**Fix.**
+`fm_backend_herdr_current_path` now reads `.result.pane.foreground_cwd // .result.pane.cwd // empty`, then on Windows only normalizes the result with `cygpath -u`: Unix keeps using `foreground_cwd` (non-empty, short-circuits the fallback; the cygpath branch is skipped entirely), Windows falls through to the live `.cwd` and reports it in MSYS form so the comparison and the downstream `cd`/`git` on the result all agree.
+`fm-spawn.sh` prefixes `treehouse get` with a PowerShell `COMSPEC` set, scoped to `uname -s` MINGW/MSYS and `BACKEND=herdr`, so treehouse's subshell is herdr-trackable.
+Unit coverage: `tests/fm-backend-herdr.test.sh` `test_current_path_falls_back_to_cwd_on_windows` (foreground_cwd absent -> `.cwd`) alongside the existing `test_current_path_reads_cwd` (foreground_cwd present still wins).
+
 ## Known gaps and follow-up notes
 
 - **RESOLVED: worktree-discovery isolation guard's symlinked-project-prefix false refusal.** Originally discovered while building the runtime-backend-auto-detection real smoke test (`tests/fm-backend-autodetect-smoke.test.sh`), which needed a scratch project.

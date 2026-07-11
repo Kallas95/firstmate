@@ -835,7 +835,24 @@ spawn_send_key() {  # <target> <key>
   esac
 }
 if [ "$KIND" != secondmate ] && [ "$BACKEND" != orca ]; then
-  spawn_send_text_line "$WT_TARGET" 'treehouse get'
+  # treehouse opens a subshell in the worktree; we detect entry by the pane's cwd
+  # moving off the project dir. On Windows + herdr that detection needs help:
+  # treehouse's default subshell is cmd.exe, whose cwd herdr cannot track (no
+  # foreground_cwd on Windows, and cmd.exe emits no OSC 7 to update the pane cwd),
+  # so the poll below never sees the move and times out. Point COMSPEC at
+  # PowerShell so treehouse opens a PowerShell subshell instead, whose cd into the
+  # worktree updates the pane cwd via OSC 7 (see fm_backend_herdr_current_path).
+  # The prefix is PowerShell syntax, valid because the herdr spawn pane runs
+  # PowerShell on Windows; scoped to Windows + herdr so no other path is affected.
+  # Verified 2026-07-11; see docs/herdr-backend.md.
+  TH_GET='treehouse get'
+  case "$(uname -s)" in
+    MINGW*|MSYS*)
+      # shellcheck disable=SC2016  # single quotes are deliberate: $env:COMSPEC expands in the PowerShell pane, not here
+      [ "$BACKEND" = herdr ] && TH_GET='$env:COMSPEC="C:\Windows\System32\WindowsPowerShell\v1.0\powershell.exe"; treehouse get'
+      ;;
+  esac
+  spawn_send_text_line "$WT_TARGET" "$TH_GET"
 
   # Wait for the treehouse subshell: the pane's cwd moves from the project to the worktree.
   # Target the stable window id, not the name: if the name is ever lost (e.g. an

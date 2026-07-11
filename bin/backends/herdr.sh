@@ -569,18 +569,44 @@ fm_backend_herdr_target_ready() {  # <target>
 # any error. Mirrors tmux's pane_current_path poll used for worktree-path
 # discovery after `treehouse get`.
 #
-# Verified pitfall: `pane get`'s `.result.pane.cwd` is the pane's cwd AT
+# Verified pitfall (Unix): `pane get`'s `.result.pane.cwd` is the pane's cwd AT
 # CREATION TIME - the top-level shell's cwd - and does NOT update when that
-# shell `cd`s or enters a subshell (as `treehouse get` does). Reading it here
+# shell `cd`s or enters a subshell (as `treehouse get` does). Reading it there
 # would make fm-spawn.sh's worktree-discovery poll never see the pane "leave"
 # the project directory, since `cwd` stays frozen at the original path forever.
 # `.result.pane.foreground_cwd` tracks the ACTUALLY RUNNING foreground
 # process's cwd instead, which is what changes when `treehouse get` enters its
 # worktree subshell - confirmed live against a real treehouse acquisition.
+#
+# Windows (Git Bash/MSYS): herdr does NOT populate `foreground_cwd` at all - the
+# field is absent from `pane get`, so foreground_cwd-only returns empty forever
+# and the poll times out. But on Windows `.cwd` DOES update live, via the
+# PowerShell shell integration's OSC 7 cwd report, so it tracks the treehouse
+# subshell's cwd there (the exact opposite of Unix). The `// .cwd` fallback below
+# recovers the worktree path on Windows while leaving Unix untouched, since
+# foreground_cwd is non-empty on Unix and short-circuits the fallback. This
+# depends on treehouse's subshell being PowerShell (which emits OSC 7), not the
+# default cmd.exe (which does not); fm-spawn.sh sets COMSPEC to arrange that.
+#
+# Windows also reports a Windows-format path (`C:\...`), while fm-spawn.sh's
+# PROJ_ABS is an MSYS path (`/c/...`); left as-is, the worktree-discovery
+# comparison `$p != $PROJ_ABS` is ALWAYS true (different strings for the same
+# dir), so the poll breaks on its first read with the project dir itself as a
+# bogus worktree. Normalize the reported path to the MSYS form with `cygpath -u`
+# on Windows so the comparison, and the downstream cd/git on the result, all see
+# one consistent format. cygpath leaves an already-POSIX path unchanged, and the
+# branch is skipped entirely off Windows, so Unix is untouched.
+# Verified 2026-07-11; see docs/herdr-backend.md.
 fm_backend_herdr_current_path() {  # <target>
   fm_backend_herdr_target_ready "$1" || return 0
-  fm_backend_herdr_cli "$FM_BACKEND_HERDR_SESSION" pane get "$FM_BACKEND_HERDR_PANE" 2>/dev/null \
-    | jq -r '.result.pane.foreground_cwd // empty' 2>/dev/null
+  local p
+  p=$(fm_backend_herdr_cli "$FM_BACKEND_HERDR_SESSION" pane get "$FM_BACKEND_HERDR_PANE" 2>/dev/null \
+    | jq -r '.result.pane.foreground_cwd // .result.pane.cwd // empty' 2>/dev/null)
+  [ -n "$p" ] || return 0
+  case "$(uname -s)" in
+    MINGW*|MSYS*) command -v cygpath >/dev/null 2>&1 && p=$(cygpath -u "$p" 2>/dev/null || printf '%s' "$p") ;;
+  esac
+  printf '%s\n' "$p"
 }
 
 # fm_backend_herdr_send_text_line: send one line of TEXT then submit,
