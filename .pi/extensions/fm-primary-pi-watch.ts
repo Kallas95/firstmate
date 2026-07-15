@@ -23,6 +23,7 @@ const state = process.env.FM_STATE_OVERRIDE || `${fmHome}/state`;
 const config = process.env.FM_CONFIG_OVERRIDE || `${fmHome}/config`;
 const armScript = `${fmRoot}/bin/fm-watch-arm.sh`;
 const marker = `${state}/.pi-watch-extension-loaded`;
+const armMsysPidFile = `${state}/.pi-watch-arm-msys-pid`;
 const extensionVersion = `sha256:${createHash("sha256").update(readFileSync(extensionFile)).digest("hex")}`;
 
 let child: any = null;
@@ -87,7 +88,28 @@ function failureLine(stdout: string, stderr: string, code: number | null): strin
 
 export default function (pi: ExtensionAPI) {
   function stopArm(): void {
-    if (child) child.kill("SIGTERM");
+    if (child) {
+      // Native node's child.kill() is TerminateProcess on Windows - the bash
+      // arm child would die without running its TERM trap (no cleanup, no lock
+      // release), and node's Windows pid cannot be mapped back to the child
+      // after MSYS exec swaps the underlying Windows process. The launch
+      // command records the child's own MSYS pid ($$ survives exec) in
+      // armMsysPidFile; deliver a real MSYS TERM to that pid via Git Bash
+      // kill. spawnSync because this also runs inside the process-exit
+      // fallback, which must stay synchronous.
+      let signalled = false;
+      if (process.platform === "win32") {
+        try {
+          const msysPid = readFileSync(armMsysPidFile, "utf8").trim();
+          if (/^[0-9]+$/.test(msysPid)) {
+            signalled = spawnSync("bash", ["-c", `kill -TERM ${msysPid}`]).status === 0;
+          }
+        } catch {
+          // fall through to child.kill below
+        }
+      }
+      if (!signalled) child.kill("SIGTERM");
+    }
     child = null;
   }
 
@@ -114,8 +136,11 @@ export default function (pi: ExtensionAPI) {
       FM_ROOT_OVERRIDE: fmRoot,
       FM_CONFIG_OVERRIDE: config,
       FM_WATCH_ARM_SCRIPT: armScript,
+      // Read back by stopArm on Windows; the bash child records its own MSYS
+      // pid there ($$ survives MSYS exec, node's Windows pid does not).
+      ...(process.platform === "win32" ? { FM_ARM_MSYS_PID_FILE: armMsysPidFile } : {}),
     };
-    child = spawn("bash", ["-lc", "config_dir=\"${FM_CONFIG_OVERRIDE:-$FM_HOME/config}\"; [ -f \"$config_dir/x-mode.env\" ] && . \"$config_dir/x-mode.env\"; exec \"$FM_WATCH_ARM_SCRIPT\" --restart"], {
+    child = spawn("bash", ["-lc", "[ -n \"${FM_ARM_MSYS_PID_FILE:-}\" ] && printf '%s\\n' \"$$\" > \"$FM_ARM_MSYS_PID_FILE\"; config_dir=\"${FM_CONFIG_OVERRIDE:-$FM_HOME/config}\"; [ -f \"$config_dir/x-mode.env\" ] && . \"$config_dir/x-mode.env\"; exec \"$FM_WATCH_ARM_SCRIPT\" --restart"], {
       cwd: fmRoot,
       env,
       stdio: ["ignore", "pipe", "pipe"],
