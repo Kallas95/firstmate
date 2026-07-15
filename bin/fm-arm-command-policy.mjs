@@ -601,10 +601,27 @@ const PROTECTED_SCRIPTS = [
   { relative: "bin/fm-watch.sh", kind: "watch" },
 ];
 
+// Commands and roots arrive in POSIX form (the callers are bash, Git Bash
+// included), but path.normalize flips separators to backslashes on Windows
+// node, which would silently un-match every protected pattern below. Compare
+// in forward-slash form everywhere. On Windows the same absolute path also
+// arrives in two spellings: MSYS converts --root/--home arguments to C:/...
+// while paths inside the command string keep the Git Bash /c/... form - fold
+// both into an uppercase-drive C:/... shape so they compare equal.
+function posixNormalize(value) {
+  let v = path.normalize(value).replaceAll("\\", "/");
+  if (process.platform === "win32") {
+    const msysDrive = /^\/([A-Za-z])(\/|$)/.exec(v);
+    if (msysDrive) v = `${msysDrive[1].toUpperCase()}:/${v.slice(msysDrive[2] ? 3 : 2)}`;
+    if (/^[a-z]:\//.test(v)) v = v[0].toUpperCase() + v.slice(1);
+  }
+  return v;
+}
+
 function protectedIdentity(value, root) {
-  const normalized = path.normalize(value);
+  const normalized = posixNormalize(value);
   for (const { relative, kind } of PROTECTED_SCRIPTS) {
-    if (normalized === relative || normalized === path.join(root, relative) || normalized.endsWith(`/${relative}`)) return kind;
+    if (normalized === relative || normalized === posixNormalize(path.join(root, relative)) || normalized.endsWith(`/${relative}`)) return kind;
   }
   return "";
 }
@@ -857,7 +874,7 @@ function analyzeProgram(command, context, depth = 0) {
 function xModePathAllowed(value, home) {
   if (value === "config/x-mode.env" || value === "./config/x-mode.env") return true;
   if (!path.isAbsolute(value)) return false;
-  return path.normalize(value) === path.join(path.normalize(home), "config/x-mode.env");
+  return posixNormalize(value) === posixNormalize(path.join(home, "config/x-mode.env"));
 }
 
 function ordinaryWordsOnly(tokens) {
@@ -900,7 +917,7 @@ function blessedProgram(analysis, context) {
 }
 
 function decision(command, root, home) {
-  const context = { root: path.normalize(root), home: path.normalize(home), protectedVariables: new Set(), watcherPatterns: new Set(), watcherPids: new Set() };
+  const context = { root: posixNormalize(root), home: posixNormalize(home), protectedVariables: new Set(), watcherPatterns: new Set(), watcherPids: new Set() };
   const analysis = analyzeProgram(command, context);
   if (analysis.broadKill) return deny("broad-watcher-kill");
   if (analysis.error && analysis.protectedFound) return deny("unclassifiable-protected-command");

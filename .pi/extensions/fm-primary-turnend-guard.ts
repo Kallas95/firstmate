@@ -55,11 +55,19 @@ function markLoaded(): void {
   writeFileSync(marker, `${extensionVersion}\n${process.pid}\n`);
 }
 
+// Windows node cannot exec a shebang script directly; spawn would emit
+// 'error' (swallowed as a pass) instead of running the guard. Route the
+// script through bash (Git Bash on PATH) there.
+function spawnScript(script: string, args: string[], stdio: ("pipe" | "ignore")[]) {
+  if (process.platform === "win32") {
+    return spawn("bash", [script, ...args], { stdio });
+  }
+  return spawn(script, args, { stdio });
+}
+
 function runGuard(): Promise<{ code: number; stderr: string }> {
   return new Promise((resolveResult) => {
-    const child = spawn(`${root}/bin/fm-turnend-guard.sh`, {
-      stdio: ["pipe", "ignore", "pipe"],
-    });
+    const child = spawnScript(`${root}/bin/fm-turnend-guard.sh`, [], ["pipe", "ignore", "pipe"]);
     let stderr = "";
     child.stderr.on("data", (chunk) => {
       stderr += chunk.toString();
@@ -79,9 +87,7 @@ function runGuard(): Promise<{ code: number; stderr: string }> {
 // script owns its own decision and is inert outside the real primary checkout.
 function runChecker(script: string, command: string): Promise<{ code: number; stderr: string }> {
   return new Promise((resolveResult) => {
-    const child = spawn(`${root}/bin/${script}`, ["--command", command], {
-      stdio: ["ignore", "ignore", "pipe"],
-    });
+    const child = spawnScript(`${root}/bin/${script}`, ["--command", command], ["ignore", "ignore", "pipe"]);
     let stderr = "";
     child.stderr.on("data", (chunk) => {
       stderr += chunk.toString();

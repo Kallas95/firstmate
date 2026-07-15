@@ -43,7 +43,14 @@ function resolvePath(anchor) {
 
 function runGuard(root) {
   if (!root) return Promise.resolve({ code: 0, stderr: "" });
-  return runProcess(`${root}/bin/fm-turnend-guard.sh`, [], '{"stop_hook_active":false}');
+  const script = `${root}/bin/fm-turnend-guard.sh`;
+  // Windows node cannot exec a shebang script directly; spawn would emit
+  // 'error' (swallowed as a pass) instead of running the guard. Route it
+  // through bash (Git Bash on PATH) there.
+  if (process.platform === "win32") {
+    return runProcess("bash", [script], '{"stop_hook_active":false}');
+  }
+  return runProcess(script, [], '{"stop_hook_active":false}');
 }
 
 async function letWatchArmRun(sessionID, client) {
