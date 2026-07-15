@@ -155,12 +155,14 @@ test_guard_warnings() {
 }
 
 test_lock_single_winner_under_concurrency() {
-  local dir state lockdir marker i pids pid wins
+  local dir state lockdir marker donedir i pids pid wins
   dir=$(make_case lock-concurrency)
   state="$dir/state"
   lockdir="$state/.contend.lock"
   marker="$dir/wins"
+  donedir="$dir/done"
   : > "$marker"
+  mkdir -p "$donedir"
   pids=
   i=1
   while [ "$i" -le 40 ]; do
@@ -168,11 +170,20 @@ test_lock_single_winner_under_concurrency() {
       . "$1"
       if fm_lock_try_acquire "$2"; then
         printf "%s\n" "$$" >> "$3"
-        # Stay alive so the held lock names a live pid for the whole window;
-        # otherwise a late contender could legitimately reclaim a dead-pid lock.
-        sleep 1
+        # Hold the lock until every loser has finished its attempt, so the
+        # held lock names a live pid for the WHOLE contention window. A fixed
+        # hold (sleep 1) breaks on slow-spawn machines: a straggler contender
+        # that first runs after the winner exited finds a dead-pid lock past
+        # the stale window and reclaims it - legitimate under the protocol,
+        # but miscounted here as a second winner.
+        i=0
+        while [ "$(ls "$4"/done.* 2>/dev/null | wc -l)" -lt 39 ] && [ "$i" -lt 1200 ]; do
+          sleep 0.05
+          i=$((i + 1))
+        done
       fi
-    ' _ "$LIB" "$lockdir" "$marker" &
+      : > "$4/done.$$"
+    ' _ "$LIB" "$lockdir" "$marker" "$donedir" &
     pids="$pids $!"
     i=$((i + 1))
   done
@@ -471,7 +482,10 @@ test_watcher_self_evicts_on_lock_takeover() {
   # Simulate a second watcher taking over the singleton lock. $$ (the test
   # runner) is a live pid that is not the watcher.
   printf '%s\n' "$$" > "$state/.watch.lock/pid"
-  wait_for_exit "$pid" 60 || fail "watcher did not self-evict after lock takeover"
+  # Generous limit: eviction takes a few watcher poll cycles and each cycle
+  # spawns processes, which slows to hundreds of ms per spawn on a loaded
+  # MSYS machine; the wait returns as soon as the watcher dies.
+  wait_for_exit "$pid" 300 || fail "watcher did not self-evict after lock takeover"
   lock_pid=$(cat "$state/.watch.lock/pid" 2>/dev/null || true)
   [ "$lock_pid" = "$$" ] || fail "self-evicting watcher clobbered the new holder's lock (got '$lock_pid')"
   pass "watcher self-evicts when the lock pid no longer names it"
