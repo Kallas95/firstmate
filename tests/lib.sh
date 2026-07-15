@@ -88,6 +88,23 @@ fm_fakebin() {
   printf '%s\n' "$fakebin"
 }
 
+# fm_fakebin_tool <fakebin> <tool> <resolved-path> exposes a real host tool
+# inside a fakebin. Wrapper scripts, not symlinks: on MSYS ln -s copies the
+# exe away from its DLLs (a copied bash.exe cannot load msys-2.0.dll when
+# PATH is only the fakebin), and bash resolves builtins like printf to a bare
+# name that no link can target. The wrapper execs the real path, so DLL
+# lookup stays in the tool's own directory; a builtin-resolved bare name runs
+# as the wrapper's /bin/sh builtin instead of recursing through PATH.
+fm_fakebin_tool() {
+  local fakebin=$1 tool=$2 tool_path=$3
+  if [ "$tool_path" = "$tool" ]; then
+    printf '#!/bin/sh\n%s "$@"\n' "$tool" > "$fakebin/$tool"
+  else
+    printf '#!/bin/sh\nexec "%s" "$@"\n' "$tool_path" > "$fakebin/$tool"
+  fi
+  chmod +x "$fakebin/$tool"
+}
+
 fm_fake_exit0() {
   local fakebin=$1 tool
   shift

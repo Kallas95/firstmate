@@ -513,7 +513,7 @@ test_hook_silent_without_jq() {
   fakebin=$(fm_fakebin "$TMP_ROOT/hook-nojq-fake")
   for tool in bash sh git cat printf date uname stat mkdir dirname; do
     tool_path=$(command -v "$tool") || fail "test host must provide $tool"
-    ln -s "$tool_path" "$fakebin/$tool"
+    fm_fakebin_tool "$fakebin" "$tool" "$tool_path"
   done
   out=$(printf '{"stop_hook_active":false}' | PATH="$fakebin" bash "$dir/bin/fm-turnend-guard.sh" 2>&1)
   status=$?

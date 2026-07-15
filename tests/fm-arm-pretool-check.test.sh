@@ -377,7 +377,7 @@ test_failopen_missing_jq() {
   local tool
   for tool in bash grep sed tr; do
     real=$(command -v "$tool")
-    ln -sf "$real" "$fakebin/$tool"
+    fm_fakebin_tool "$fakebin" "$tool" "$real"
   done
   PATH="$fakebin" bash -c "printf '%s' '{\"tool_input\":{\"command\":\"bin/fm-watch-arm.sh &\"}}' | '$CHECK'" >/dev/null 2>&1
   rc=$?
@@ -392,7 +392,7 @@ test_failopen_missing_node() {
   mkdir -p "$fakebin"
   for tool in bash dirname; do
     real=$(command -v "$tool")
-    ln -sf "$real" "$fakebin/$tool"
+    fm_fakebin_tool "$fakebin" "$tool" "$real"
   done
   PATH="$fakebin" "$CHECK" --command 'bin/fm-watch-arm.sh &' >/dev/null 2>&1
   rc=$?
