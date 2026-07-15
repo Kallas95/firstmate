@@ -20,6 +20,17 @@ set -u
 . "$(dirname "${BASH_SOURCE[0]}")/lib.sh"
 
 BASE_PATH=${FM_TEST_BASE_PATH:-/usr/bin:/bin:/usr/sbin:/sbin}
+# The suite needs a REAL git under BASE_PATH: tool detection checks for it
+# (COMMON_TOOLS) and the fleet-sync fakes delegate repo-state queries through
+# `command git`. On Git-for-Windows git lives in /mingw64/bin, outside the
+# hermetic Unix base, so append the ambient git's own directory there.
+case "$(uname -s)" in
+  MINGW*|MSYS*)
+    if command -v git >/dev/null 2>&1; then
+      BASE_PATH="$BASE_PATH:$(dirname "$(command -v git)")"
+    fi
+    ;;
+esac
 TMP_ROOT=$(fm_test_tmproot fm-bootstrap-tests)
 export FM_BACKEND_CMUX_BUNDLE_BIN="$TMP_ROOT/no-bundled-cmux"
 
@@ -114,7 +125,13 @@ add_real_jq() {
   real_jq=$(command -v jq 2>/dev/null) || fail "jq is required for dispatch profile validation tests"
   cat > "$fakebin/jq" <<SH
 #!/usr/bin/env bash
-exec '$real_jq' "\$@"
+# Native Windows jq builds open stdout in text mode and emit CRLF (even 1.8.x),
+# which poisons exact-string assertions against bootstrap output. Strip the CRs
+# here on MSYS; everywhere else stay a plain exec shim.
+case "\$(uname -s)" in
+  MINGW*|MSYS*) '$real_jq' "\$@" | tr -d '\r'; exit "\${PIPESTATUS[0]}" ;;
+  *) exec '$real_jq' "\$@" ;;
+esac
 SH
   chmod +x "$fakebin/jq"
 }
