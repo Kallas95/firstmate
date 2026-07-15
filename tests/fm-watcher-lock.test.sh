@@ -427,7 +427,11 @@ test_watch_restart_reports_healthy_peer_without_attaching() {
   state="$dir/state"
   fakebin="$dir/fakebin"
   out="$dir/restart.out"
-  node -e 'process.on("SIGTERM", () => {}); setTimeout(() => {}, 300000)' &
+  # A TERM-resistant peer must be an MSYS-native process on Windows: MSYS kill
+  # emulates TERM to non-MSYS binaries (like node) as TerminateProcess, which no
+  # in-process handler can ignore, so a node peer dies and the restart steals the
+  # lock. bash's trap ignores TERM identically on every platform.
+  bash -c 'trap "" TERM; sleep 300' &
   peer=$!
   identity=$(FM_STATE_OVERRIDE="$state" bash -c '. "$1"; fm_pid_identity "$2"' _ "$LIB" "$peer") || fail "could not identify peer pid"
   mkdir "$state/.watch.lock"
