@@ -272,19 +272,21 @@ SH
   chmod +x "$stub/perl" "$fixture"
 
   if ! PATH="$stub:$PATH" "$RUNNER" "$fixture" >"$tmp/out.txt" 2>"$tmp/err.txt"; then
+    cat "$tmp/out.txt" "$tmp/err.txt"
     rm -rf "$tmp"
-    fail "a perl without Time::HiRes must not abort the runner: $(cat "$tmp/err.txt")"
+    fail "a perl without Time::HiRes must not abort the runner"
   fi
   grep -Eq '^FM_TEST_END .+ duration_ms=[0-9]+ ' "$tmp/out.txt" \
-    || { rm -rf "$tmp"; fail "no duration after perl fell through: $(cat "$tmp/out.txt")"; }
+    || { cat "$tmp/out.txt" "$tmp/err.txt"; rm -rf "$tmp"; fail "no duration after perl fell through"; }
 
   cp "$stub/perl" "$stub/python3"
   if ! PATH="$stub:$PATH" "$RUNNER" "$fixture" >"$tmp/out2.txt" 2>"$tmp/err2.txt"; then
+    cat "$tmp/out2.txt" "$tmp/err2.txt"
     rm -rf "$tmp"
-    fail "a broken perl and python3 must not abort the runner: $(cat "$tmp/err2.txt")"
+    fail "a broken perl and python3 must not abort the runner"
   fi
   grep -Eq '^FM_TEST_END .+ duration_ms=[0-9]+ ' "$tmp/out2.txt" \
-    || { rm -rf "$tmp"; fail "no duration from the date fallback: $(cat "$tmp/out2.txt")"; }
+    || { cat "$tmp/out2.txt" "$tmp/err2.txt"; rm -rf "$tmp"; fail "no duration from the date fallback"; }
   rm -rf "$tmp"
   pass "timing falls through interpreters that cannot print a timestamp"
 }
