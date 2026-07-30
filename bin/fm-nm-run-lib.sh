@@ -76,6 +76,10 @@ fm_nm_field() {  # <toon-output> <key>
 # diverged or rewritten head still fails is-ancestor, and a worktree that
 # advanced past the run head carries local commits the gate repo has never
 # seen, which also fails. Both wrong-run rejections survive the widening.
+# That widening reaches only a gate remote naming a local directory: `no-mistakes
+# init` wires it as a bare path or as the same path in `file://` form, and both
+# resolve here, while any other remote form leaves the head unresolvable and the
+# run unattributed.
 fm_nm_head_matches_worktree() {  # <worktree> <run_head>
   local wt=$1 run_head=$2 local_full run_full repo
   [ -n "$run_head" ] || return 1

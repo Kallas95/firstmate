@@ -1384,6 +1384,30 @@ EOF
   pass "coarse fallback binds a gate-only fix head"
 }
 
+# `git remote get-url` answers with whatever form the remote was wired in, and a
+# local repo is just as legitimately addressed as a `file://` URL as by a bare
+# path. The URL form must resolve the same way, or the incident returns on any
+# home wired that way.
+test_gate_only_fix_head_binds_with_file_url_remote() {
+  reset_fakes
+  local d gate fix_head out
+  d=$(new_case gate-fix-file-url)
+  make_repo_on_branch "$d/wt" fm/feat-gateurl
+  make_fakebin "$d" >/dev/null
+  gate=$(make_gate_repo "$d" "$d/wt" fm/feat-gateurl)
+  git -C "$d/wt" remote set-url no-mistakes "file://$gate"
+  fix_head=$(make_gate_only_commit "$gate" fm/feat-gateurl "$(git -C "$d/wt" rev-parse HEAD)")
+  git -C "$d/wt" rev-parse --verify "${fix_head}^{commit}" >/dev/null 2>&1 \
+    && fail "fixture leak: gate fix commit resolvable in the worktree"
+  fm_write_meta "$d/state/gateurl.meta" "window=fm:fm-gateurl" "worktree=$d/wt" "kind=ship"
+  FM_FAKE_RUN_HEAD="$fix_head"
+  FM_FAKE_AXI_STATUS="$(run_running fm/feat-gateurl)"
+  out=$(run_crew_state "$d" gateurl)
+  assert_contains "$out" "state: working" "file:// gate remote resolves the gate-only fix head"
+  assert_contains "$out" "source: run-step" "file:// gate remote binds the live run"
+  pass "a file:// gate remote resolves a gate-only fix head"
+}
+
 # A genuinely rewritten head that exists only in the gate repo, on DIVERGED
 # history, must still be rejected: gate-repo resolution must not weaken the
 # wrong-run protection.
@@ -1510,6 +1534,7 @@ test_active_run_descendant_fix_head_remains_current
 test_local_advanced_past_run_head_invalidates
 test_gate_only_fix_head_binds_live_run
 test_coarse_gate_only_fix_head_binds
+test_gate_only_fix_head_binds_with_file_url_remote
 test_gate_only_diverged_head_not_attributed
 test_gate_only_head_with_local_advance_not_attributed
 test_missing_run_head_falls_back_to_current_state
