@@ -120,10 +120,16 @@ now_iso() {
 }
 
 now_ms() {
-  if command -v python3 >/dev/null 2>&1; then
+  # Prefer perl: Time::HiRes is core and starts in ~10ms, while a python3 that
+  # resolves through a version-manager shim (e.g. pyenv) costs ~200ms per call.
+  # now_ms runs twice around every fixture, so a slow interpreter starves the
+  # jobs scheduler's slot-refill margin and fails its timing test.
+  if command -v perl >/dev/null 2>&1; then
+    perl -MTime::HiRes=time -e 'printf("%d\n", time() * 1000)'
+  elif command -v python3 >/dev/null 2>&1; then
     python3 -c 'import time; print(int(time.time() * 1000))'
   else
-    # Second precision only when python3 is unavailable.
+    # Second precision only when neither perl nor python3 is available.
     echo $(($(date +%s) * 1000))
   fi
 }
