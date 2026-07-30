@@ -314,6 +314,7 @@ test_pi_compat_missing_adapter_exports() {
   # failing with ERR_UNKNOWN_FILE_EXTENSION.
   fixture="$TMP_ROOT/ts-import-probe"
   mkdir -p "$fixture"
+  printf '%s\n' '{"type":"module"}' >"$fixture/package.json"
   printf 'export const ok: string = "ok";\n' >"$fixture/probe.ts"
   if ! (cd "$fixture" && node --input-type=module -e 'await import("./probe.ts")' >/dev/null 2>&1); then
     echo "skip: node cannot import TypeScript modules for Pi calm missing-adapter-export test"

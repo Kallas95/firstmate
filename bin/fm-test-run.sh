@@ -124,14 +124,20 @@ now_ms() {
   # resolves through a version-manager shim (e.g. pyenv) costs ~200ms per call.
   # now_ms runs twice around every fixture, so a slow interpreter starves the
   # jobs scheduler's slot-refill margin and fails its timing test.
-  if command -v perl >/dev/null 2>&1; then
-    perl -MTime::HiRes=time -e 'printf("%d\n", time() * 1000)'
-  elif command -v python3 >/dev/null 2>&1; then
-    python3 -c 'import time; print(int(time.time() * 1000))'
+  # An interpreter wins only when it actually prints a value: a perl without
+  # Time::HiRes, or a python3 shim with no runtime behind it, falls through.
+  local ms
+  if ms=$(perl -MTime::HiRes=time -e 'printf("%d\n", time() * 1000)' 2>/dev/null) &&
+    [ -n "$ms" ]; then
+    :
+  elif ms=$(python3 -c 'import time; print(int(time.time() * 1000))' 2>/dev/null) &&
+    [ -n "$ms" ]; then
+    :
   else
     # Second precision only when neither perl nor python3 is available.
-    echo $(($(date +%s) * 1000))
+    ms=$(($(date +%s) * 1000))
   fi
+  printf '%s\n' "$ms"
 }
 
 # Primary family for one tests/*.test.sh basename. Unmapped scripts are
