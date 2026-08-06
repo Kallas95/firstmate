@@ -1425,12 +1425,13 @@ test_gate_only_diverged_head_not_attributed() {
   [ -n "$orphan" ] || fail "fixture: orphan gate commit was not created"
   git -C "$d/wt" rev-parse --verify "${orphan}^{commit}" >/dev/null 2>&1 \
     && fail "fixture leak: orphan gate commit resolvable in the worktree"
-  fm_write_meta "$d/state/gatediv.meta" "window=fm:fm-gatediv" "worktree=$d/wt" "kind=ship"
+  fm_write_meta "$d/state/gatediv.meta" "window=fm:fm-gatediv" "worktree=$d/wt" "kind=ship" "harness=claude"
   printf 'working: stage 2 in progress\n' > "$d/state/gatediv.status"
   FM_FAKE_RUN_HEAD="$orphan"
   FM_FAKE_AXI_STATUS="$(run_parked fm/feat-gatediv)"
   FM_FAKE_RUNS_LIST=""
   FM_FAKE_BUSY=0
+  arm_idle_record "$d/state" gatediv
   out=$(run_crew_state "$d" gatediv)
   assert_not_contains "$out" "source: run-step" "diverged gate-only head must not bind"
   assert_contains "$out" "source: status-log" "diverged gate-only head falls back"
@@ -1452,12 +1453,13 @@ test_gate_only_head_with_local_advance_not_attributed() {
   fix_head=$(make_gate_only_commit "$gate" fm/feat-gateadv "$base_head")
   # The crew moved on: new local work the gate repo has never seen.
   git -C "$d/wt" commit -q --allow-empty -m 'local stage-2 work after prior run'
-  fm_write_meta "$d/state/gateadv.meta" "window=fm:fm-gateadv" "worktree=$d/wt" "kind=ship"
+  fm_write_meta "$d/state/gateadv.meta" "window=fm:fm-gateadv" "worktree=$d/wt" "kind=ship" "harness=claude"
   printf 'working: stage 2 implementation in progress\n' > "$d/state/gateadv.status"
   FM_FAKE_RUN_HEAD="$fix_head"
   FM_FAKE_AXI_STATUS="$(run_parked fm/feat-gateadv)"
   FM_FAKE_RUNS_LIST=""
   FM_FAKE_BUSY=0
+  arm_idle_record "$d/state" gateadv
   out=$(run_crew_state "$d" gateadv)
   assert_not_contains "$out" "source: run-step" "advanced local tip must not bind a gate-only run head"
   assert_contains "$out" "source: status-log" "falls back after local work advanced past the run"
