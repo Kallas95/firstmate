@@ -105,7 +105,11 @@ fm_harness_process_matches() {  # <comm> <args>
 # worker chain (hook shell -> claude bg-spare -> claude bg-pty-host -> claude ->
 # claude), with no non-harness process between them. Which pid in that run is the
 # session cannot be read off the ancestry at all, so the whole contiguous run is
-# reported and the callers below decide what they need from it.
+# reported and the callers below decide what they need from it. The run may
+# include Claude daemon-infrastructure pids (claude daemon run, --bg-pty-host,
+# --bg-spare); those are deliberately left in the printed ancestry so membership
+# can still walk through them, and only the election and liveness verdicts below
+# skip them.
 fm_harness_ancestry_pids() {
   local pid=$$ comm args extending=0 printed=0
   for _ in 1 2 3 4 5 6 7 8 9 10 11 12 13 14 15 16; do
@@ -125,31 +129,61 @@ fm_harness_ancestry_pids() {
   [ "$printed" -eq 1 ]
 }
 
+# True when argument string $1 marks Claude Code daemon infrastructure rather
+# than a real interactive session process: the `claude daemon run` worker, its
+# bg-pty-host, or its bg-spare. These are long-lived PPID-1 processes, so a lock
+# naming one can never go stale after the real session dies; neither the election
+# nor the liveness verdict may ever select one. The markers are Claude-specific,
+# so a non-Claude harness never matches.
+fm_harness_daemon_infra() {  # <args>
+  case " $1 " in
+    *" daemon run "*|*" --bg-pty-host "*|*" --bg-spare "*) return 0 ;;
+  esac
+  return 1
+}
+
 # Print the one pid that identifies this session when the session lock is being
-# WRITTEN: the outermost pid of the contiguous run. That is the pid that lives as
-# long as the session - a Claude worker several levels in is reaped when its hook
-# returns, and a lock naming it would look stale moments later while the session
-# is still running. Every non-Claude harness reports a single pid, so this is its
-# innermost match unchanged.
+# WRITTEN: the outermost pid of the contiguous run that is not Claude daemon
+# infrastructure. That is the pid that lives as long as the session - a Claude
+# worker several levels in is reaped when its hook returns, and a lock naming it
+# would look stale moments later while the session is still running. Every
+# non-Claude harness reports a single pid, so this is its innermost match
+# unchanged.
+#
+# Claude Code's daemon worker chain (hook shell -> claude bg-spare -> claude
+# bg-pty-host -> claude daemon run) is long-lived and PPID-1, so a lock naming
+# any of those pids can never go stale after the real session dies. The election
+# therefore skips every daemon-infrastructure pid and returns the topmost real
+# session process below the chain; if the whole contiguous run is daemon
+# infrastructure there is no session pid to elect and the election fails rather
+# than writing a doomed lock.
 fm_harness_ancestry_pid() {
-  local pids pid outermost=''
+  local pids pid args candidate=''
   pids=$(fm_harness_ancestry_pids) || return 1
   while IFS= read -r pid; do
-    [ -n "$pid" ] && outermost=$pid
+    [ -n "$pid" ] || continue
+    args=$(ps -o args= -p "$pid" 2>/dev/null)
+    fm_harness_daemon_infra "$args" || candidate=$pid
   done <<EOF
 $pids
 EOF
-  [ -n "$outermost" ] || return 1
-  printf '%s\n' "$outermost"
+  [ -n "$candidate" ] || return 1
+  printf '%s\n' "$candidate"
 }
 
-# True if $1 is a live process that looks like a verified harness.
+# True if $1 is a live process that looks like a verified harness and is not
+# Claude daemon infrastructure. A live daemon worker (claude daemon run,
+# --bg-pty-host, --bg-spare) is long-lived and PPID-1, so it must never count as
+# a live session holder: a legacy lock naming the daemon then classifies as stale
+# and is recoverable through the normal takeover path.
 fm_harness_pid_alive() {
   local pid=$1 comm args
   kill -0 "$pid" 2>/dev/null || return 1
   comm=$(ps -o comm= -p "$pid" 2>/dev/null) || return 1
   args=$(ps -o args= -p "$pid" 2>/dev/null)
-  fm_harness_process_matches "$comm" "$args"
+  fm_harness_process_matches "$comm" "$args" || return 1
+  fm_harness_daemon_infra "$args" && return 1
+  return 0
 }
 
 # True when state dir $1 holds a session lock whose pid is ANY harness ancestor
