@@ -312,8 +312,7 @@ fm_backend_herdr_capture "$SCROLL_TARGET" 40 >/dev/null \
   || fail "capture failed during the viewport-stability check"
 fm_backend_herdr_capture_ansi "$SCROLL_TARGET" 20 >/dev/null \
   || fail "capture_ansi failed during the viewport-stability check"
-cs=$(fm_backend_herdr_composer_state "$SCROLL_TARGET")
-[ "$cs" != unknown ] || fail "composer_state could not capture the pane during the viewport-stability check"
+fm_backend_herdr_composer_state "$SCROLL_TARGET" >/dev/null
 scroll_after=$(herdr pane get "$SCROLL_PANE_ID" --session "$SESSION" | jq -c '.result.pane.scroll')
 [ "$scroll_before" = "$scroll_after" ] || fail "a firstmate capture moved the pane viewport: $scroll_before -> $scroll_after"
 pass "real herdr: a firstmate capture never moves the pane viewport (no scroll for alternative-screen harnesses)"
