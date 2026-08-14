@@ -136,20 +136,31 @@ fm_harness_ancestry_pids() {
 # nor the liveness verdict may ever select one.
 #
 # Only the leading command/flag tokens of argv are read: the `daemon run`
-# subcommand immediately after the executable, or a --bg-pty-host/--bg-spare
-# flag inside the leading run of options before the first bare word. Free-text
+# subcommand immediately after the command preamble, or a
+# --bg-pty-host/--bg-spare flag inside the leading run of options before the
+# first bare word. The preamble is the executable token, plus the script-path
+# token when a bare interpreter (node, python) execs Claude Code - the same
+# npm-install shape fm_harness_process_matches identifies as Claude. Free-text
 # argument content - a prompt or launch brief that merely mentions these
-# phrases - sits at or beyond the first bare word, so it can never mark a real
-# session as infrastructure. The verdict is additionally gated on
-# FM_HARNESS_IS_CLAUDE: callers classify the same process with
+# phrases - sits at or beyond the first bare word past the preamble, so it can
+# never mark a real session as infrastructure. The verdict is additionally
+# gated on FM_HARNESS_IS_CLAUDE: callers classify the same process with
 # fm_harness_process_matches first, and a non-Claude harness never matches even
 # when its own argv starts with one of these tokens.
 fm_harness_daemon_infra() {  # <args>
-  local rest word
+  local head rest word
   [ "${FM_HARNESS_IS_CLAUDE:-0}" -eq 1 ] || return 1
   case "$1" in
-    *' '*) rest=${1#* } ;;
+    *' '*) head=${1%% *} rest=${1#* } ;;
     *) return 1 ;;
+  esac
+  case "${head##*/}" in
+    *node*|*python*)
+      case "$rest" in
+        *' '*) rest=${rest#* } ;;
+        *) return 1 ;;
+      esac
+      ;;
   esac
   case "$rest" in
     'daemon run'|'daemon run '*) return 0 ;;

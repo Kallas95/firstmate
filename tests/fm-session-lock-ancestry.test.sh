@@ -379,6 +379,54 @@ SH
   pass "session-lock: daemon phrases in prompt free text never mark a real session as infrastructure"
 }
 
+test_node_wrapped_daemon_is_infrastructure() {
+  local dir fakebin got
+  dir="$TMP_ROOT/daemon-node-wrapped"
+  fakebin=$(fm_fakebin "$dir")
+  mkdir -p "$dir/state"
+  cat > "$fakebin/ps" <<'SH'
+#!/usr/bin/env bash
+set -u
+field= pid=
+while [ "$#" -gt 0 ]; do
+  case "$1" in
+    -o) field=$2; shift 2 ;;
+    -p) pid=$2; shift 2 ;;
+    *) shift ;;
+  esac
+done
+case "$pid:$field" in
+  60:comm=) printf '%s\n' node ;;
+  60:args=) printf '%s\n' 'node /opt/node_modules/@anthropic-ai/claude-code/cli.js daemon run' ;;
+  60:ppid=) printf '%s\n' 1 ;;
+  70:comm=) printf '%s\n' node ;;
+  70:args=) printf '%s\n' 'node /opt/node_modules/@anthropic-ai/claude-code/cli.js --resume' ;;
+  70:ppid=) printf '%s\n' 60 ;;
+  75:comm=) printf '%s\n' node ;;
+  75:args=) printf '%s\n' 'node /opt/node_modules/@anthropic-ai/claude-code/cli.js -cFIRSTMATE_OP: v1 launch-brief: restart claude daemon run workers' ;;
+  75:ppid=) printf '%s\n' 1 ;;
+  *:comm=) printf '%s\n' bash ;;
+  *:args=) printf '%s\n' 'bash hook.sh' ;;
+  *:ppid=) printf '%s\n' 70 ;;
+esac
+SH
+  chmod +x "$fakebin/ps"
+  # An npm-installed Claude Code runs interpreter-wrapped, so the daemon
+  # markers sit after the interpreter and script-path preamble; free text in a
+  # wrapped session's argv still never matches.
+  got=$(lib_eval "$fakebin" 'fm_harness_ancestry_pid') \
+    || fail "election found no real session below the node-wrapped daemon"
+  [ "$got" = 70 ] || fail "election picked '$got', expected the wrapped session pid 70"
+  if lib_eval "$fakebin" 'fm_harness_pid_alive 60'; then
+    fail "a live node-wrapped daemon was accepted as a live session holder"
+  fi
+  lib_eval "$fakebin" 'fm_harness_pid_alive 70' \
+    || fail "a live node-wrapped session was rejected as a live holder"
+  lib_eval "$fakebin" 'fm_harness_pid_alive 75' \
+    || fail "a live node-wrapped session with daemon phrases in its prompt was rejected"
+  pass "session-lock: an interpreter-wrapped daemon is infrastructure, wrapped sessions stay real"
+}
+
 test_membership_walks_through_daemon_parented_chain() {
   local dir fakebin
   dir="$TMP_ROOT/daemon-membership"
@@ -607,6 +655,7 @@ test_election_skips_daemon_infrastructure
 test_election_fails_when_only_daemon_infrastructure_matches
 test_daemon_pid_is_never_a_live_holder
 test_free_text_daemon_phrases_do_not_mark_a_real_session
+test_node_wrapped_daemon_is_infrastructure
 test_membership_walks_through_daemon_parented_chain
 test_non_claude_harnesses_are_untouched
 test_e2e_version_named_session_claims_the_home
