@@ -133,13 +133,40 @@ fm_harness_ancestry_pids() {
 # than a real interactive session process: the `claude daemon run` worker, its
 # bg-pty-host, or its bg-spare. These are long-lived PPID-1 processes, so a lock
 # naming one can never go stale after the real session dies; neither the election
-# nor the liveness verdict may ever select one. The markers are Claude-specific,
-# so a non-Claude harness never matches.
+# nor the liveness verdict may ever select one.
+#
+# Only the leading command/flag tokens of argv are read: the `daemon run`
+# subcommand immediately after the executable, or a --bg-pty-host/--bg-spare
+# flag inside the leading run of options before the first bare word. Free-text
+# argument content - a prompt or launch brief that merely mentions these
+# phrases - sits at or beyond the first bare word, so it can never mark a real
+# session as infrastructure. The verdict is additionally gated on
+# FM_HARNESS_IS_CLAUDE: callers classify the same process with
+# fm_harness_process_matches first, and a non-Claude harness never matches even
+# when its own argv starts with one of these tokens.
 fm_harness_daemon_infra() {  # <args>
-  case " $1 " in
-    *" daemon run "*|*" --bg-pty-host "*|*" --bg-spare "*) return 0 ;;
+  local rest word
+  [ "${FM_HARNESS_IS_CLAUDE:-0}" -eq 1 ] || return 1
+  case "$1" in
+    *' '*) rest=${1#* } ;;
+    *) return 1 ;;
   esac
-  return 1
+  case "$rest" in
+    'daemon run'|'daemon run '*) return 0 ;;
+  esac
+  while :; do
+    word=${rest%% *}
+    case "$word" in
+      --) return 1 ;;
+      --bg-pty-host|--bg-pty-host=*|--bg-spare|--bg-spare=*) return 0 ;;
+      -*) ;;
+      *) return 1 ;;
+    esac
+    case "$rest" in
+      *' '*) rest=${rest#* } ;;
+      *) return 1 ;;
+    esac
+  done
 }
 
 # Print the one pid that identifies this session when the session lock is being
@@ -158,11 +185,13 @@ fm_harness_daemon_infra() {  # <args>
 # infrastructure there is no session pid to elect and the election fails rather
 # than writing a doomed lock.
 fm_harness_ancestry_pid() {
-  local pids pid args candidate=''
+  local pids pid comm args candidate=''
   pids=$(fm_harness_ancestry_pids) || return 1
   while IFS= read -r pid; do
     [ -n "$pid" ] || continue
+    comm=$(ps -o comm= -p "$pid" 2>/dev/null)
     args=$(ps -o args= -p "$pid" 2>/dev/null)
+    fm_harness_process_matches "$comm" "$args" || true
     fm_harness_daemon_infra "$args" || candidate=$pid
   done <<EOF
 $pids

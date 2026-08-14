@@ -336,6 +336,49 @@ SH
   pass "session-lock: a live daemon pid is never a live session holder"
 }
 
+test_free_text_daemon_phrases_do_not_mark_a_real_session() {
+  local dir fakebin got
+  dir="$TMP_ROOT/daemon-free-text"
+  fakebin=$(fm_fakebin "$dir")
+  mkdir -p "$dir/state"
+  cat > "$fakebin/ps" <<'SH'
+#!/usr/bin/env bash
+set -u
+field= pid=
+while [ "$#" -gt 0 ]; do
+  case "$1" in
+    -o) field=$2; shift 2 ;;
+    -p) pid=$2; shift 2 ;;
+    *) shift ;;
+  esac
+done
+case "$pid:$field" in
+  80:comm=) printf '%s\n' claude ;;
+  80:args=) printf '%s\n' 'claude daemon run' ;;
+  80:ppid=) printf '%s\n' 1 ;;
+  90:comm=) printf '%s\n' claude ;;
+  90:args=) printf '%s\n' 'claude --model opus -cFIRSTMATE_OP: v1 launch-brief: restart claude daemon run and its --bg-pty-host / --bg-spare workers' ;;
+  90:ppid=) printf '%s\n' 80 ;;
+  *:comm=) printf '%s\n' bash ;;
+  *:args=) printf '%s\n' 'bash hook.sh' ;;
+  *:ppid=) printf '%s\n' 90 ;;
+esac
+SH
+  chmod +x "$fakebin/ps"
+  # The daemon markers appear only inside the session's prompt free text, so
+  # pid 90 is a real session: it must win the election and count as live,
+  # while the daemon above it still must not.
+  got=$(lib_eval "$fakebin" 'fm_harness_ancestry_pid') \
+    || fail "a real session with daemon phrases in its prompt text lost the election entirely"
+  [ "$got" = 90 ] || fail "election picked '$got', expected the real session pid 90"
+  lib_eval "$fakebin" 'fm_harness_pid_alive 90' \
+    || fail "a live session with daemon phrases in its prompt text was rejected as a live holder"
+  if lib_eval "$fakebin" 'fm_harness_pid_alive 80'; then
+    fail "the daemon above the free-text session was accepted as a live holder"
+  fi
+  pass "session-lock: daemon phrases in prompt free text never mark a real session as infrastructure"
+}
+
 test_membership_walks_through_daemon_parented_chain() {
   local dir fakebin
   dir="$TMP_ROOT/daemon-membership"
@@ -401,7 +444,7 @@ while [ "\$#" -gt 0 ]; do
 done
 case "\$pid:\$field" in
   500:comm=) printf '%s\n' $name ;;
-  500:args=) printf '%s\n' $name ;;
+  500:args=) printf '%s\n' '$name daemon run --bg-spare' ;;
   500:ppid=) printf '%s\n' 1 ;;
   *:comm=) printf '%s\n' bash ;;
   *:args=) printf '%s\n' 'bash hook.sh' ;;
@@ -409,6 +452,8 @@ case "\$pid:\$field" in
 esac
 SH
     chmod +x "$fakebin/ps"
+    # The argv deliberately leads with the daemon tokens: only Claude processes
+    # may ever classify as daemon infrastructure.
     got=$(lib_eval "$fakebin" 'fm_harness_ancestry_pid') \
       || fail "$name: the harness was not found in the ancestry"
     [ "$got" = 500 ] || fail "$name: election resolved '$got', expected 500"
@@ -561,6 +606,7 @@ test_competing_version_named_session_is_seen_as_live
 test_election_skips_daemon_infrastructure
 test_election_fails_when_only_daemon_infrastructure_matches
 test_daemon_pid_is_never_a_live_holder
+test_free_text_daemon_phrases_do_not_mark_a_real_session
 test_membership_walks_through_daemon_parented_chain
 test_non_claude_harnesses_are_untouched
 test_e2e_version_named_session_claims_the_home
