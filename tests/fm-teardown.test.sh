@@ -2762,6 +2762,44 @@ test_reissued_slot_without_marker_skips_return() {
   pass "a reissued slot is never re-returned even when the durable marker is lost"
 }
 
+# Mirror of the incident window: a PREDECESSOR of this slot already returned it
+# (its own worktree-returned marker proves that) but awaits its sanctioned
+# rerun, so its stale meta still binds the same worktree path. The CURRENT
+# tenant's teardown must ignore that past-tenancy binding and still perform
+# its own return.
+test_returned_predecessor_binding_does_not_skip_current_return() {
+  local case_dir
+  case_dir=$(make_case predecessor-returned)
+  write_meta "$case_dir" local-only ship
+  wt_commit "$case_dir" "landed work"
+  merge_wt_into_local_main "$case_dir"
+  add_logging_treehouse "$case_dir"
+  fm_write_meta "$case_dir/state/task-x0.meta" \
+    "window=firstmate:fm-task-x0" \
+    "endpoint_task_id=task-x0" \
+    "worktree=$case_dir/wt" \
+    "project=$case_dir/project" \
+    "kind=ship" \
+    "mode=no-mistakes"
+  : > "$case_dir/state/task-x0.worktree-returned"
+
+  run_teardown "$case_dir" > "$case_dir/stdout" 2> "$case_dir/stderr" \
+    || fail "predecessor-returned: teardown failed: $(cat "$case_dir/stderr")"
+  grep -q "return --force $case_dir/wt" "$case_dir/treehouse.log" \
+    || fail "predecessor-returned: the owned slot was never returned: $(cat "$case_dir/treehouse.log")"
+  grep -q "skipping worktree return" "$case_dir/stdout" \
+    && fail "predecessor-returned: the predecessor's stale binding wrongly skipped the return"
+  [ -e "$case_dir/state/task-x0.worktree-returned" ] \
+    || fail "predecessor-returned: the predecessor's own return marker was removed"
+  [ -e "$case_dir/state/task-x0.meta" ] \
+    || fail "predecessor-returned: the predecessor's metadata was removed"
+  [ ! -e "$case_dir/state/task-x1.worktree-returned" ] \
+    || fail "predecessor-returned: the return marker survived a completed teardown"
+  grep -q "teardown task-x1 complete" "$case_dir/stdout" \
+    || fail "predecessor-returned: teardown did not report completion"
+  pass "a returned predecessor's stale binding does not block the current tenant's own return"
+}
+
 test_local_only_fork_remote_allows
 test_teardown_prompts_tasks_axi_done_when_compatible
 test_teardown_manual_backend_prompts_hand_edit_even_when_tasks_axi_present
@@ -2824,3 +2862,4 @@ test_rerun_after_return_and_reissue_never_rereturns
 test_first_run_still_returns_worktree
 test_rerun_still_bound_unreturned_returns
 test_reissued_slot_without_marker_skips_return
+test_returned_predecessor_binding_does_not_skip_current_return

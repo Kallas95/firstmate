@@ -63,10 +63,13 @@
 # state/<id>.worktree-returned marker, touched immediately after this task's
 # own successful return, and the current fleet bindings - another task's meta
 # recording the same worktree path proves the slot was reissued even when the
-# marker is lost. When either shows the worktree is no longer this task's, the
-# safety inspection, run-abort, worktree process reap, branch delete, hook
-# removal, and the return itself are all skipped with one line, while tasktmp
-# reaping, the pane close retry, and durable-record cleanup continue unchanged.
+# marker is lost. A binding whose task carries its own worktree-returned
+# marker is ignored: that task provably gave the slot back already, so its
+# meta records a past tenancy, not a live claim. When either signal shows the
+# worktree is no longer this task's, the safety inspection, run-abort,
+# worktree process reap, branch delete, hook removal, and the return itself
+# are all skipped with one line, while tasktmp reaping, the pane close retry,
+# and durable-record cleanup continue unchanged.
 # The marker is removed with the rest of the volatile state once teardown
 # completes.
 # Usage: fm-teardown.sh <task-id> [--force]
@@ -2300,11 +2303,13 @@ WORKTREE_RETURN_MARKER="$STATE/$ID.worktree-returned"
 WORKTREE_OWNED_BY_TASK=1
 WORKTREE_SKIP_REASON=
 
-# Echoes the id of another task whose meta records the same worktree path,
-# proving the pool slot was reissued; returns non-zero when no other task
-# binds it.
+# Echoes the id of another task whose meta records the same worktree path
+# without its own worktree-returned marker, proving the pool slot was
+# reissued; a marker-bearing binding is a stale record of an already-returned
+# tenancy and is skipped. Returns non-zero when no other task holds a live
+# binding.
 worktree_reissued_to_other_task() {
-  local meta other_id other_wt abs_wt abs_other
+  local meta other_id other_wt abs_wt abs_other other_marker
   [ -n "$WT" ] || return 1
   abs_wt=$(canonical_existing_dir "$WT") || abs_wt=$WT
   for meta in "$STATE"/*.meta; do
@@ -2315,6 +2320,10 @@ worktree_reissued_to_other_task() {
     [ -n "$other_wt" ] || continue
     abs_other=$(canonical_existing_dir "$other_wt") || abs_other=$other_wt
     [ "$abs_other" = "$abs_wt" ] || continue
+    other_marker="$STATE/$other_id.worktree-returned"
+    if [ -e "$other_marker" ] || [ -L "$other_marker" ]; then
+      continue
+    fi
     printf '%s\n' "$other_id"
     return 0
   done
