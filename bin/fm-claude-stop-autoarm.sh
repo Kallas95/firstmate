@@ -15,9 +15,11 @@
 #     second proof is required because Claude Code serves hook commands from a
 #     shared worker pool whose top process is reparented to init, which can leave
 #     a hook with no ancestry path back to its live session at all; both proofs
-#     are owned by bin/fm-session-lock-lib.sh. When an existing numeric owner
-#     fails the shared harness-liveness predicate, the hook delegates guarded
-#     recovery to bin/fm-lock.sh and then re-verifies ownership. A live owner, a
+#     and the disjunction over them are owned by bin/fm-session-lock-lib.sh, so
+#     the admission check and the post-recovery re-check cannot drift apart.
+#     When an existing numeric owner fails the shared harness-liveness
+#     predicate, the hook delegates guarded recovery to bin/fm-lock.sh and then
+#     re-verifies ownership through that same disjunction. A live owner, a
 #     missing or malformed lock, and a lock naming another session all remain
 #     inert, so a competing session never arms or rewakes.
 #   - AFK: while state/.afk exists the away daemon owns the watcher and triage;
@@ -55,9 +57,11 @@
 # This hook never blocks the Stop decision itself and never prints to stdout:
 # exit 0 is always silent, and exit 2 carries the rewake banner on stderr. The
 # opt-in FM_AUTOARM_TRACE diagnostic is the one exception: when it is set to a
-# non-empty value, every gate that ends the run names itself on stderr so an
-# inert hook can be diagnosed under real hook conditions. It changes no decision
-# and is never set in normal operation.
+# non-empty value, every gate that ends the run inert BEFORE it claims the cycle
+# names itself on stderr, which is what diagnoses a hook that never claims the
+# home under real hook conditions. Exits after that claim stay silent and are
+# read from the epoch ledger instead. It changes no decision and is never set in
+# normal operation.
 # On any uncertainty such as unresolvable ancestry, malformed lock state, or
 # lock contention, it exits 0 and leaves continuity to the synchronous guard and
 # the model.
@@ -126,10 +130,13 @@ fi
 # idle or away home remains byte-for-byte inert. Missing or malformed locks are
 # uncertainty rather than stale-owner evidence and remain inert.
 RECOVER_SESSION_LOCK=0
-if fm_session_lock_owned_by_self "$STATE"; then
-  trace 'identity: proven by harness ancestry'
-elif fm_session_lock_owned_by_claude_hook "$STATE" "$PAYLOAD"; then
-  trace "identity: proven by the delivering Claude session (pid ${CLAUDE_PID:-?})"
+if fm_session_lock_owned_by_this_claude_session "$STATE" "$PAYLOAD"; then
+  case "$FM_SESSION_LOCK_PROOF" in
+    ancestry) trace 'identity: proven by harness ancestry' ;;
+    claude-session)
+      trace "identity: proven by the delivering Claude session (pid ${CLAUDE_PID:-?})"
+      ;;
+  esac
 else
   LOCK_PID=$(cat "$STATE/.lock" 2>/dev/null || true)
   case "$LOCK_PID" in
@@ -164,14 +171,16 @@ fi
 # --- stale session-lock recovery ---------------------------------------------
 # Delegate the claim to fm-lock.sh so its live-owner refusal and write semantics
 # remain the single acquisition owner, then re-verify current-session identity
-# before touching any auto-arm state.
+# before touching any auto-arm state. The re-check uses the same two-proof
+# predicate as the admission gate above on purpose: if fm-lock.sh ever elects a
+# different pid than it does today, this verification must not silently narrow
+# to ancestry alone.
 if [ "$RECOVER_SESSION_LOCK" -eq 1 ]; then
   if ! "$SCRIPT_DIR/fm-lock.sh" >/dev/null 2>&1; then
     trace 'inert: guarded session-lock recovery refused'
     exit 0
   fi
-  if ! fm_session_lock_owned_by_self "$STATE" \
-    && ! fm_session_lock_owned_by_claude_hook "$STATE" "$PAYLOAD"; then
+  if ! fm_session_lock_owned_by_this_claude_session "$STATE" "$PAYLOAD"; then
     trace 'inert: ownership unproven after session-lock recovery'
     exit 0
   fi

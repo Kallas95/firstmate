@@ -235,3 +235,37 @@ $pids
 EOF
   return 1
 }
+
+# True when the Claude session behind the current run holds state dir $1's
+# session lock, proven either by harness ancestry or by the identity delivered
+# with hook payload $2. This disjunction is the ONE owner of "may this run act
+# for this home", so the gate that admits a run and any later re-verification
+# cannot drift apart.
+#
+# Both members are load-bearing. Ancestry is tried first and left unchanged,
+# because a legitimate claude-launched-by-claude wrapper chain records the
+# OUTERMOST pid in the lock while CLAUDE_PID names the inner session, so
+# preferring the delivered identity would refuse that case. The delivered
+# identity is required because a hook served by the shared per-user worker pool
+# reparented to init has no ancestry path back to its live session at all.
+# Neither member is a fallback for the other: a caller that needs only one of
+# them still calls that one directly.
+#
+# FM_SESSION_LOCK_PROOF names the member that carried the verdict, so a caller
+# can report which proof applied; it is empty when neither holds.
+# shellcheck disable=SC2034 # Read by sourcing callers, not inside this file.
+FM_SESSION_LOCK_PROOF=''
+# shellcheck disable=SC2034 # FM_SESSION_LOCK_PROOF is a caller-read output.
+fm_session_lock_owned_by_this_claude_session() {  # <state-dir> <payload>
+  local state=$1 payload=${2-}
+  FM_SESSION_LOCK_PROOF=''
+  if fm_session_lock_owned_by_self "$state"; then
+    FM_SESSION_LOCK_PROOF=ancestry
+    return 0
+  fi
+  if fm_session_lock_owned_by_claude_hook "$state" "$payload"; then
+    FM_SESSION_LOCK_PROOF=claude-session
+    return 0
+  fi
+  return 1
+}
