@@ -446,6 +446,47 @@ Observed guarantee: after ordinary `session_shutdown` for `/new`, `/resume`, and
 Stale prior-generation tool callbacks could not mutate the active child, repeated transitions kept exactly one live arm cycle, and terminal `quit` still refused late rearm.
 Plain Pi and pi-signed share the same tracked `.pi/extensions/fm-primary-pi-watch.ts` path, so both inherit the generation owner; other primary harnesses are not applicable because they do not use this Pi extension lifecycle.
 
+### Claude Stop hook session identity, 2026-08-15
+
+Claude Code 2.1.233 on macOS 25.6.0 was instrumented with a Stop hook that records the delivered payload, the hook's process ancestry, and its `CLAUDE_*` environment.
+The pass covered a headless `claude -p` session and an interactive session in a pty, and both delivered these identity fields to the hook:
+
+```text
+CLAUDE_PID=<pid of the claude session process>
+CLAUDE_CODE_SESSION_ID=<session uuid>
+payload {"session_id":"<same session uuid>", ... ,"hook_event_name":"Stop"}
+```
+
+The same machine showed why ancestry alone is not sufficient.
+Claude Code serves session commands from a shared per-user worker pool under `/tmp/cc-daemon-<uid>/`, and a pool whose owning session has exited survives with its top process reparented to init:
+
+```text
+27305     1 claude bg-pty-host --bg-pty-host /tmp/cc-daemon-501/.../d6bfe5e1.pty.sock 200 50 -- .../versions/2.1.232 ...
+27316 27305 claude bg-spare --bg-spare /tmp/cc-daemon-501/.../d6bfe5e1.claim.sock
+25610 27316 /bin/zsh -c ... bin/fm-watch-arm.sh ...
+```
+
+A command served by that pool has a contiguous claude ancestry of `{27316, 27305}` and no path to the live session, whose pid the home's lock records.
+The affected home's `state/.claude-autoarm-epoch` had not advanced for about fourteen hours while work was in flight, matching an identity gate that refuses every firing.
+
+`FM_AUTOARM_TRACE=1 bin/fm-claude-stop-autoarm.sh` names the gate that ends a run, which is how an inert hook is diagnosed without changing any decision.
+Against a fixture home whose lock names a live claude process the hook's own chain cannot reach, the three cases are:
+
+```text
+autoarm-trace: inert: live session <pid> owns this home and it is not this one     # no identity exported, exit 0
+autoarm-trace: identity: proven by the delivering Claude session (pid <pid>)       # own session, exit 2, watcher armed
+autoarm-trace: inert: live session <pid> owns this home and it is not this one     # foreign session, exit 0
+```
+
+The live guard ran against Claude Code 2.1.233 on the same date:
+
+```sh
+FM_CLAUDE_LIVE_E2E=1 tests/fm-claude-stop-autoarm-live-e2e.test.sh
+```
+
+Observed: the session recorded itself as the home's owner, the identity it exported to its Stop hooks named that same pid, the payload and environment session ids matched, the auto-arm ledger recorded `outcome=rewake`, and no turn was blocked for ending blind.
+The tokenless-cycle count in that guard is sensitive to how many drains the fixture observes and is not a property of the identity proof; it reproduces identically on the unpatched hook.
+
 Deterministic entry points:
 
 ```sh
