@@ -892,7 +892,7 @@ test_exited_declared_pause_is_bounded_but_live_gate_absorbed() {
 }
 
 # A live agent that declared a pause is absorbed on the long cadence, but a
-# declared pause must never mask an agent that subsequently dies: endpoint-mort
+# declared pause must never mask an agent that subsequently dies: endpoint-death
 # detection keeps priority over the long cadence. So when the same pane goes
 # dead after being absorbed as a live pause, it must still re-surface on the
 # bounded pause cadence (the death is detected for a recheck), never stay hidden
