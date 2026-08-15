@@ -56,12 +56,12 @@
 #
 # This hook never blocks the Stop decision itself and never prints to stdout:
 # exit 0 is always silent, and exit 2 carries the rewake banner on stderr. The
-# opt-in FM_AUTOARM_TRACE diagnostic is the one exception: when it is set to a
-# non-empty value, every gate that ends the run inert BEFORE it claims the cycle
-# names itself on stderr, which is what diagnoses a hook that never claims the
-# home under real hook conditions. Exits after that claim stay silent and are
-# read from the epoch ledger instead. It changes no decision and is never set in
-# normal operation.
+# opt-in FM_CLAUDE_AUTOARM_TRACE diagnostic is the one exception: when it is
+# set to a non-empty value, every gate that ends the run inert BEFORE it claims
+# the cycle names itself on stderr, which is what diagnoses a hook that never
+# claims the home under real hook conditions. Exits after that claim stay silent
+# and are read from the epoch ledger instead. It changes no decision and is
+# never set in normal operation.
 # On any uncertainty such as unresolvable ancestry, malformed lock state, or
 # lock contention, it exits 0 and leaves continuity to the synchronous guard and
 # the model.
@@ -83,10 +83,10 @@ case "$AUTOARM_ATTEMPTS" in
   *) AUTOARM_ATTEMPTS=2 ;;
 esac
 
-# Opt-in gate diagnostic. Silent unless FM_AUTOARM_TRACE is set to a non-empty
-# value, so the production contract above is unchanged.
+# Opt-in gate diagnostic. Silent unless FM_CLAUDE_AUTOARM_TRACE is set to a
+# non-empty value, so the production contract above is unchanged.
 trace() {  # <message>
-  [ -n "${FM_AUTOARM_TRACE:-}" ] || return 0
+  [ -n "${FM_CLAUDE_AUTOARM_TRACE:-}" ] || return 0
   printf 'autoarm-trace: %s\n' "$*" >&2
 }
 
@@ -146,7 +146,7 @@ else
       ;;
   esac
   if fm_harness_pid_alive "$LOCK_PID"; then
-    trace "inert: live session $LOCK_PID owns this home and it is not this one"
+    trace "inert: live session $LOCK_PID owns this home and neither identity proof applies (CLAUDE_PID=${CLAUDE_PID:-unset})"
     exit 0
   fi
   trace "identity: recorded owner $LOCK_PID is dead, recovery pending"

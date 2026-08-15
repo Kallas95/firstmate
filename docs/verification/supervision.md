@@ -469,13 +469,13 @@ Claude Code serves session commands from a shared per-user worker pool under `/t
 A command served by that pool has a contiguous claude ancestry of `{27316, 27305}` and no path to the live session, whose pid the home's lock records.
 The affected home's `state/.claude-autoarm-epoch` had not advanced for about fourteen hours while work was in flight, matching an identity gate that refuses every firing.
 
-`FM_AUTOARM_TRACE=1 bin/fm-claude-stop-autoarm.sh` names the gate that ends a run, which is how an inert hook is diagnosed without changing any decision.
+`FM_CLAUDE_AUTOARM_TRACE=1 bin/fm-claude-stop-autoarm.sh` names the gate that ends a run, which is how an inert hook is diagnosed without changing any decision.
 Against a fixture home whose lock names a live claude process the hook's own chain cannot reach, the three cases are:
 
 ```text
-autoarm-trace: inert: live session <pid> owns this home and it is not this one     # no identity exported, exit 0
-autoarm-trace: identity: proven by the delivering Claude session (pid <pid>)       # own session, exit 2, watcher armed
-autoarm-trace: inert: live session <pid> owns this home and it is not this one     # foreign session, exit 0
+autoarm-trace: inert: live session <pid> owns this home and neither identity proof applies (CLAUDE_PID=unset)         # no identity exported, exit 0
+autoarm-trace: identity: proven by the delivering Claude session (pid <pid>)                                          # own session, exit 2, watcher armed
+autoarm-trace: inert: live session <pid> owns this home and neither identity proof applies (CLAUDE_PID=<other-pid>)   # foreign session, exit 0
 ```
 
 The live guard ran against Claude Code 2.1.233 on the same date:

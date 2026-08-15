@@ -11,9 +11,13 @@
 # the installed Claude Code must still deliver a session pid and session id to
 # its Stop hooks, and the delivered payload must still name the same session,
 # because bin/fm-session-lock-lib.sh cannot prove ownership from ancestry alone
-# when Claude serves the hook from its shared worker pool. Losing either signal
-# fails here, naming the harness and version, instead of silently returning the
-# whole fleet to the inert-hook bug.
+# when Claude serves the hook from its shared worker pool. That proof is
+# measured on BOTH delivery paths, synchronous and detached asyncRewake, because
+# the hook that consumes it is registered asyncRewake and a release that kept
+# the signals only on the synchronous path would return the fleet to the
+# inert-hook bug with every other check still green. Losing either signal on
+# either path fails here, naming the harness and version, instead of silently
+# returning the whole fleet to the inert-hook bug.
 # The project and FM_HOME are isolated; Claude keeps using its existing managed
 # authentication. No live fleet home, worktree, or session is touched.
 # shellcheck disable=SC2016 # the model, not this test shell, reads the prompt text
@@ -53,8 +57,10 @@ cp -R "$ROOT/bin/." "$PROJECT/bin/"
 cp "$ROOT/.claude/settings.json" "$PROJECT/.claude/settings.json"
 # The lab keeps the real tracked .claude/settings.json SessionStart nudge,
 # Stop guard, and asyncRewake auto-arm registration.
-# The only local hook records model-issued Bash calls without acquiring the
-# session lock or otherwise changing lifecycle behavior.
+# The local hooks only record model-issued Bash calls and what Claude hands a
+# Stop hook on each delivery path, the synchronous one and the detached
+# asyncRewake one the auto-arm itself runs on. Neither acquires the session lock
+# or otherwise changes lifecycle behavior.
 cat > "$PROJECT/.claude/settings.local.json" <<'JSON'
 {
   "hooks": {
@@ -69,7 +75,13 @@ cat > "$PROJECT/.claude/settings.local.json" <<'JSON'
     "Stop": [
       {
         "hooks": [
-          { "type": "command", "command": "\"$CLAUDE_PROJECT_DIR\"/bin/stop-identity-probe.sh" }
+          { "type": "command", "command": "\"$CLAUDE_PROJECT_DIR\"/bin/stop-identity-probe.sh stop-identity.log" },
+          {
+            "type": "command",
+            "command": "\"$CLAUDE_PROJECT_DIR\"/bin/stop-identity-probe.sh stop-identity-async.log",
+            "asyncRewake": true,
+            "timeout": 600
+          }
         ]
       }
     ]
@@ -77,8 +89,10 @@ cat > "$PROJECT/.claude/settings.local.json" <<'JSON'
 }
 JSON
 
-# Records what the installed Claude Code actually hands a Stop hook. It exits 0
-# silently and holds no lock, so it changes no lifecycle behavior.
+# Records what the installed Claude Code actually hands a Stop hook. $1 names
+# the log for this delivery path, so the synchronous and asyncRewake
+# registrations never share a file. It exits 0 silently and holds no lock, so it
+# changes no lifecycle behavior on either path.
 cat > "$PROJECT/bin/stop-identity-probe.sh" <<'SH'
 #!/usr/bin/env bash
 PAYLOAD=$(cat 2>/dev/null || true)
@@ -86,7 +100,7 @@ PAYLOAD=$(cat 2>/dev/null || true)
   printf 'claude_pid=%s\n' "${CLAUDE_PID:-}"
   printf 'env_session_id=%s\n' "${CLAUDE_CODE_SESSION_ID:-}"
   printf 'payload=%s\n' "$PAYLOAD"
-} >> "$FM_HOME/state/stop-identity.log" 2>/dev/null
+} >> "$FM_HOME/state/$1" 2>/dev/null
 exit 0
 SH
 chmod +x "$PROJECT/bin/stop-identity-probe.sh"
@@ -172,6 +186,36 @@ PROBE_PAYLOAD_SESSION=$(fm_claude_payload_session_id "$PROBE_PAYLOAD") \
 RECORDED_OWNER=$(cat "$HOME_DIR/state/.lock" 2>/dev/null || true)
 [ "$PROBE_PID" = "$RECORDED_OWNER" ] \
   || fail "Claude $CLAUDE_VERSION exported session pid $PROBE_PID while this session recorded owner $RECORDED_OWNER, so the session-identity proof no longer matches the recorded owner"
+
+# The same proof on the delivery path the auto-arm actually runs on. Claude
+# registers bin/fm-claude-stop-autoarm.sh with "asyncRewake": true, so it is
+# served detached, which is the very context the shared worker pool broke. A
+# release that kept exporting identity to synchronous Stop hooks and stopped on
+# the detached ones would leave every check above green while the hook went
+# inert again, so the detached path carries its own alarm. An absent log is that
+# regression, not a reason to skip.
+ASYNC_IDENTITY_LOG="$HOME_DIR/state/stop-identity-async.log"
+async_wait=0
+while [ "$async_wait" -lt 60 ] && [ ! -s "$ASYNC_IDENTITY_LOG" ]; do
+  async_wait=$((async_wait + 1))
+  sleep 0.5
+done
+[ -s "$ASYNC_IDENTITY_LOG" ] \
+  || fail "Claude $CLAUDE_VERSION delivered no Stop hook identity at all on the detached asyncRewake path, the path bin/fm-claude-stop-autoarm.sh runs on"
+ASYNC_PROBE_PID=$(sed -n 's/^claude_pid=//p' "$ASYNC_IDENTITY_LOG" | sed -n '1p')
+ASYNC_PROBE_ENV_SESSION=$(sed -n 's/^env_session_id=//p' "$ASYNC_IDENTITY_LOG" | sed -n '1p')
+ASYNC_PROBE_PAYLOAD=$(sed -n 's/^payload=//p' "$ASYNC_IDENTITY_LOG" | sed -n '1p')
+case "$ASYNC_PROBE_PID" in
+  ''|*[!0-9]*) fail "Claude $CLAUDE_VERSION no longer exports a numeric CLAUDE_PID to its detached asyncRewake Stop hooks (got '$ASYNC_PROBE_PID')" ;;
+esac
+[ -n "$ASYNC_PROBE_ENV_SESSION" ] \
+  || fail "Claude $CLAUDE_VERSION no longer exports CLAUDE_CODE_SESSION_ID to its detached asyncRewake Stop hooks"
+ASYNC_PROBE_PAYLOAD_SESSION=$(fm_claude_payload_session_id "$ASYNC_PROBE_PAYLOAD") \
+  || fail "Claude $CLAUDE_VERSION no longer names a session_id in the Stop payload it delivers on the detached asyncRewake path: $ASYNC_PROBE_PAYLOAD"
+[ "$ASYNC_PROBE_PAYLOAD_SESSION" = "$ASYNC_PROBE_ENV_SESSION" ] \
+  || fail "Claude $CLAUDE_VERSION delivered a detached asyncRewake Stop payload for session $ASYNC_PROBE_PAYLOAD_SESSION while exporting $ASYNC_PROBE_ENV_SESSION, so the two identity signals no longer corroborate each other on that path"
+[ "$ASYNC_PROBE_PID" = "$RECORDED_OWNER" ] \
+  || fail "Claude $CLAUDE_VERSION exported session pid $ASYNC_PROBE_PID to its detached asyncRewake Stop hooks while this session recorded owner $RECORDED_OWNER, so the session-identity proof no longer matches the recorded owner on the path the hook runs on"
 
 ARM_RUNS=$(wc -l < "$HOME_DIR/state/arm-ran" 2>/dev/null | tr -d ' ')
 [ "$ARM_RUNS" = 2 ] || fail "expected exactly 2 hook-owned arm cycles, got $ARM_RUNS: $(cat "$HOME_DIR/state/arm-ran" 2>/dev/null)"

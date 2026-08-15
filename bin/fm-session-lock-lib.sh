@@ -1,10 +1,16 @@
 #!/usr/bin/env bash
 # Shared session-lock harness identity.
 #
-# ONE owner of the "which verified-harness process holds this home's session
-# lock, and does the current process descend from that same harness?" decision.
-# bin/fm-lock.sh uses it to acquire and inspect state/.lock;
-# bin/fm-claude-stop-autoarm.sh uses it to prove a Stop hook fires inside the
+# ONE owner of "may this run act for the session that holds this home's lock?",
+# over two independent proofs and the disjunction that arbitrates them. Ancestry
+# asks whether the current process descends from the verified harness the lock
+# records. Delivered Claude session identity instead asks whether the session
+# that emitted this hook event is the one the lock names, which is needed
+# because Claude Code serves hook commands from a shared per-user worker pool
+# whose top process is reparented to init, leaving a hook with no ancestry path
+# back to its own live session; docs/watcher-continuity.md owns that contract.
+# bin/fm-lock.sh uses this file to acquire and inspect state/.lock;
+# bin/fm-claude-stop-autoarm.sh uses it to prove a Stop hook fires for the
 # lock-owning primary session before it may arm or rewake.
 # This file is sourced by scripts and has no side effects on source.
 
