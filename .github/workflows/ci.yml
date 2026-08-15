@@ -368,9 +368,10 @@ jobs:
             exit 1
           }
 
-          # Teardown's preflight guards refuse through `|| return 1` around a
-          # source, which stock Bash 3.2 skips entirely. Only this lane can
-          # catch that regression; every other lane runs Bash 5.
+          # Teardown's preflight guards only reach their refusal under stock
+          # Bash 3.2 because of the readability tests fm_backend_adapter_readable
+          # owns in bin/fm-backend.sh. Only this lane can catch a regression
+          # there; every other lane runs Bash 5.
           teardown_output=$(/bin/bash tests/fm-teardown.test.sh)
           printf '%s\n' "$teardown_output"
           teardown_count=$(printf '%s\n' "$teardown_output" | grep -c '^ok - ')

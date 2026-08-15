@@ -67,6 +67,9 @@ export REAL_LSOF_FOR_TEST
 
 # Build a fresh sandbox for one test case. Sets up:
 #   $CASE/state/        - firstmate state dir (with a fresh watcher beacon)
+#   $CASE/data/         - empty fake data dir both teardown entry points pass
+#                         as FM_DATA_OVERRIDE, so no case ever reads the
+#                         running machine's own data/secondmates.md
 #   $CASE/fakebin/      - mocks for treehouse, tmux (PATH-prepended by caller)
 #   $CASE/origin.git/   - bare upstream repo (so the project clone has origin)
 #   $CASE/project/      - clone of origin; acts as the firstmate project dir
