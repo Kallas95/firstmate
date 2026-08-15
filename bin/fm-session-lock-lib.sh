@@ -125,6 +125,23 @@ fm_harness_ancestry_pids() {
   [ "$printed" -eq 1 ]
 }
 
+# True when pid $1 is a member of that contiguous harness ancestry: the ONE
+# owner of "is this pid a harness process the current run genuinely sits inside".
+# Both membership questions in this file ask it - of the pid the lock records,
+# and of the served-session pid the harness reports. An ancestry that cannot be
+# resolved answers false, so every caller stays fail-closed.
+fm_harness_ancestry_contains() {  # <pid>
+  local want=$1 pids pid
+  [ -n "$want" ] || return 1
+  pids=$(fm_harness_ancestry_pids) || return 1
+  while IFS= read -r pid; do
+    [ "$pid" = "$want" ] && return 0
+  done <<EOF
+$pids
+EOF
+  return 1
+}
+
 # Print the one pid that identifies this session when the session lock is being
 # WRITTEN: the outermost pid of the contiguous run. That is the pid that lives as
 # long as the session - a Claude worker several levels in is reaped when its hook
@@ -132,15 +149,9 @@ fm_harness_ancestry_pids() {
 # is still running. Every non-Claude harness reports a single pid, so this is its
 # innermost match unchanged.
 fm_harness_ancestry_pid() {
-  local pids pid outermost=''
+  local pids
   pids=$(fm_harness_ancestry_pids) || return 1
-  while IFS= read -r pid; do
-    [ -n "$pid" ] && outermost=$pid
-  done <<EOF
-$pids
-EOF
-  [ -n "$outermost" ] || return 1
-  printf '%s\n' "$outermost"
+  printf '%s\n' "${pids##*$'\n'}"
 }
 
 # True if $1 is a live process that looks like a verified harness.
@@ -161,18 +172,12 @@ fm_harness_pid_alive() {
 # lock, a malformed lock, a lock held by a harness outside this ancestry, or an
 # ancestry that cannot be resolved all fail closed.
 fm_session_lock_owned_by_self() {
-  local state=$1 lock_pid pids pid
+  local state=$1 lock_pid
   lock_pid=$(cat "$state/.lock" 2>/dev/null || true)
   case "$lock_pid" in
     ''|*[!0-9]*) return 1 ;;
   esac
-  pids=$(fm_harness_ancestry_pids) || return 1
-  while IFS= read -r pid; do
-    [ "$pid" = "$lock_pid" ] && return 0
-  done <<EOF
-$pids
-EOF
-  return 1
+  fm_harness_ancestry_contains "$lock_pid"
 }
 
 # Path of the durable session-identity binding that sits beside state dir $1's
@@ -215,18 +220,12 @@ fm_harness_session_identity() {
 # point is that the ancestry reaches the pool process serving the call while
 # never reaching the pid the lock records.
 fm_harness_session_is_ours() {
-  local claimed=${CLAUDE_PID:-} pids pid
+  local claimed=${CLAUDE_PID:-}
   case "$claimed" in
     ''|*[!0-9]*) return 1 ;;
   esac
   fm_harness_pid_alive "$claimed" || return 1
-  pids=$(fm_harness_ancestry_pids) || return 1
-  while IFS= read -r pid; do
-    [ "$pid" = "$claimed" ] && return 0
-  done <<EOF
-$pids
-EOF
-  return 1
+  fm_harness_ancestry_contains "$claimed"
 }
 
 # Record, beside state dir $1's session lock, that lock pid $2 was acquired by

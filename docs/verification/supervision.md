@@ -83,11 +83,22 @@ Every payload carried a `session_id`, byte-equal to the `CLAUDE_CODE_SESSION_ID`
 
 The second fact bounds the defect rather than describing it: on this path ancestry already reaches the session, so a foreground session is never refused its own lock at its own session open.
 The refusal observed in the field came from a session hosted in a Claude Code background job, whose calls are served by a reparented pool (`claude bg-spare` under `claude bg-pty-host`, itself reparented to init) that stops short of the lock owner.
-That is why the binding is required and why `CLAUDE_PID` equality alone would not answer it: from that pool `CLAUDE_PID` names the pool process, not the pid the lock records.
-It remains load-bearing as corroboration, since a session identity inherited through the environment can otherwise be replayed by any process the session launched.
+That is why the binding is required and why `CLAUDE_PID` equality alone would not answer it.
+One reparented pool was measured, on the TOOL CALL path, from the refused session itself:
+
+| Path | `CLAUDE_PID` | Process it names | That process's parent | Observed harness ancestry | `state/.lock` |
+| --- | --- | --- | --- | --- | --- |
+| tool call served by a reparented worker pool, 2026-08-15, Claude Code 2.1.233 | 27316 | 27316 `claude bg-spare --bg-spare /tmp/cc-daemon-501/51f9f9bc/spare/d6bfe5e1.claim.sock` | 27305 `claude bg-pty-host ... d6bfe5e1.pty.sock ...`, PPID 1 | [27316, 27305] | 89187, live, `claude --dangerously-skip-permissions` |
+
+On that path `CLAUDE_PID` does name a pool process, and that process is a member of the current ancestry, so `fm_harness_session_is_ours` answers true while ancestry itself never reaches 89187.
+That row confirms the premise for the tool-call path and for nothing else.
+The case "the `SessionStart` hook itself fires from a reparented pool" is NOT covered by any recorded measurement: every session open in the six-row table above was served by the session process itself.
+Were `CLAUDE_PID` to name the session rather than the pool on such a path, corroboration would fail and the read-only refusal would stand.
+`CLAUDE_PID` remains load-bearing as corroboration either way, since a session identity inherited through the environment can otherwise be replayed by any process the session launched.
 
 `tests/fm-session-lock-identity.test.sh` pins the resulting logic portably with a deterministic process table, verified on 2026-08-15 under both GNU bash 3.2.57 on Darwin 25.6.0 and GNU bash 5.3.9 on aarch64 Alpine.
-`tests/fm-sessionstart-hook-live-e2e.test.sh` refreshes the vendor half of this record; run it after every Claude Code upgrade before trusting the table above.
+`tests/fm-sessionstart-hook-live-e2e.test.sh` refreshes only the session-open half of this record, the six-row table above: it reaches no reparented worker pool, so the tool-call row stays a hand-recorded measurement.
+Run it after every Claude Code upgrade before trusting those six rows.
 Its 2026-08-15 run against Claude Code 2.1.233 checked five real session opens and found a corroborated session identity on every one:
 
 ```text
