@@ -328,7 +328,7 @@ jobs:
   macos-stock-bash:
     name: Stock macOS Bash snapshot compatibility
     runs-on: macos-latest
-    timeout-minutes: 10
+    timeout-minutes: 20
     steps:
       - uses: actions/checkout@v6
       - name: Run snapshot consumers with stock Bash
@@ -365,6 +365,17 @@ jobs:
           bearings_count=$(printf '%s\n' "$bearings_output" | grep -c '^ok - ')
           [ "$bearings_count" -eq 41 ] || {
             echo "::error::expected 41 Bearings tests, got $bearings_count"
+            exit 1
+          }
+
+          # Teardown's preflight guards refuse through `|| return 1` around a
+          # source, which stock Bash 3.2 skips entirely. Only this lane can
+          # catch that regression; every other lane runs Bash 5.
+          teardown_output=$(/bin/bash tests/fm-teardown.test.sh)
+          printf '%s\n' "$teardown_output"
+          teardown_count=$(printf '%s\n' "$teardown_output" | grep -c '^ok - ')
+          [ "$teardown_count" -eq 58 ] || {
+            echo "::error::expected 58 teardown tests, got $teardown_count"
             exit 1
           }
 
