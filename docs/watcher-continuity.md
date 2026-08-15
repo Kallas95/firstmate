@@ -86,7 +86,9 @@ The same suite covers ordinary same-process session replacement for `/new`, `/re
 `tests/fm-watcher-lock.test.sh` covers verified-successor attach, recovery publication before stale-lock removal, the typed self-eviction failure, bounded and successor-linked lifecycle rows, and a SIGSTOP counterfactual that distinguishes a live PID from a stale beacon before classifying termination.
 `tests/fm-subagent-pretool-check.test.sh` proves Claude retains only the non-status Bash seatbelts.
 `tests/fm-claude-stop-autoarm.test.sh` covers the auto-arm's scope, stale and live session owners, unchanged AFK and need boundaries, single-flight, bounded failure retries, benign live-watcher cycle ends, one-notice failure episodes, and exit-2 translation.
+The same suite runs both ownership proofs over real processes, including a hook served from a worker chain that cannot reach its own session, the foreign-session refusal that is the safety counter-proof, an unconfirmed, absent, or malformed delivered identity, a missing or malformed recorded owner, and a main home's session refused against a secondmate home on the same machine.
 `FM_CLAUDE_LIVE_E2E=1 tests/fm-claude-stop-autoarm-live-e2e.test.sh` starts with the reproduced stale-lock state, runs session start first, completes two tokenless cycles, and checks the competing-live-owner negative control.
+It also fails, naming the installed harness and version, if Claude Code stops delivering the session identity the second proof depends on, on the synchronous Stop path or on the detached `asyncRewake` path the hook itself runs on.
 `tests/fm-turnend-guard.test.sh` covers the cooperative `--claude` guard, including monotonic failed-epoch progression, the integrated bounded fail-open, post-alarm continuation suppression, and positive recovery reset.
 
 ## Active limits and verification
