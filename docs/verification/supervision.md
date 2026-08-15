@@ -289,7 +289,9 @@ That inertness result is scoped to the builds it exercised: it did not establish
 
 The secondmate-home scope and manual-repair wake path were measured with Claude Code 2.1.207 on 2026-07-12, when a native background completion re-invoked the idle model with no human input.
 The current Stop-owned main/secondmate inclusion and child-worktree exclusion are covered deterministically by `tests/fm-claude-stop-autoarm.test.sh`.
-Session-lock ownership in `bin/fm-session-lock-lib.sh` is decided against a session's whole contiguous harness ancestry rather than one chosen pid, so the Stop auto-arm reaches its lock owner wherever that owner sits: the outermost pid of Claude Code's multi-level `bg-spare` hook worker chain, or an inner pid when a harness-named daemon parents the session.
+Session-lock ownership in `bin/fm-session-lock-lib.sh` is decided by either of two proofs: membership of a session's whole contiguous harness ancestry, or the session identity Claude delivers with the event, which turns on a strict `lock_pid = CLAUDE_PID` equality and therefore does decide on one chosen pid.
+The ancestry proof reaches its lock owner wherever that owner sits: the outermost pid of Claude Code's multi-level `bg-spare` hook worker chain, or an inner pid when a harness-named daemon parents the session.
+[`watcher-continuity.md`](../watcher-continuity.md) owns that two-proof identity contract.
 Harness identity is read from the executable path and `argv[0]` as well as the command basename, because Claude Code's native installer names the per-session executable by its version (`.../share/claude/versions/2.1.220`): `ps -o comm=` reports that path on macOS and the bare version string on Linux, and neither basename names a harness.
 `tests/fm-session-lock-ancestry.test.sh` pins both platforms' reporting semantics behind a deterministic process table and runs the real Stop auto-arm in version-named, daemon-parented, and combined real process trees.
 `tests/fm-watch-arm.test.sh` runs real watcher and arm cycles against durable on-disk state to verify that a delivered reason survives until post-handling acknowledgement and stops replaying after acknowledgement, while an unrelated queue append cannot make a watcher cycle that delivered nothing look successful.
@@ -478,13 +480,22 @@ autoarm-trace: identity: proven by the delivering Claude session (pid <pid>)    
 autoarm-trace: inert: live session <pid> owns this home and neither identity proof applies (CLAUDE_PID=<other-pid>)   # foreign session, exit 0
 ```
 
-The live guard ran against Claude Code 2.1.233 on the same date:
+Those three lines are the strings the current code emits, captured on 2026-08-15 by running the hook with `FM_CLAUDE_AUTOARM_TRACE=1` against such a fixture home, once per case.
+
+The live guard ran twice against Claude Code 2.1.233 on 2026-08-15, after the detached-path alarm was added to it, the second time with the lab cleanup suppressed so its artifacts could be measured:
 
 ```sh
 FM_CLAUDE_LIVE_E2E=1 tests/fm-claude-stop-autoarm-live-e2e.test.sh
 ```
 
-Observed: the session recorded itself as the home's owner, the identity it exported to its Stop hooks named that same pid, the payload and environment session ids matched, the auto-arm ledger recorded `outcome=rewake`, and no turn was blocked for ending blind.
+```text
+ok - Claude 2.1.233 (Claude Code) live E2E reclaimed a stale session lock through session start, completed two tokenless Stop-owned rewake cycles, preserved the competing-live-owner boundary, and still delivers the session identity the ownership proof depends on
+```
+
+The lab registers two `asyncRewake` Stop hooks, the tracked auto-arm plus a probe that records what the harness hands a detached hook, and both delivery paths were measured rather than assumed.
+The synchronous probe and the detached one each logged three records, matching the session's three Stops, so Claude Code runs EVERY registered `asyncRewake` Stop hook at a turn end rather than only the first, and the detached alarm has a delivery path that genuinely reaches it.
+On both paths the session exported `CLAUDE_PID=20323`, exactly the pid `state/.lock` recorded, and `CLAUDE_CODE_SESSION_ID` equalled the delivered payload's `session_id`, both `1ea063c6-94c4-459e-ad19-8603c2bbfb6c`.
+The auto-arm hook ran on those same Stops: `state/arm-ran` held two hook-owned cycles, `state/.claude-autoarm-epoch` recorded `epoch=4 owner_pid=25124 outcome=rewake`, no owner lock was left behind, and no turn was blocked for ending blind.
 The tokenless-cycle count in that guard is sensitive to how many drains the fixture observes and is not a property of the identity proof; it reproduces identically on the unpatched hook.
 
 Deterministic entry points:
