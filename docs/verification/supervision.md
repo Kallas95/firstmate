@@ -61,6 +61,40 @@ The third is recorded below.
 | Codex | codex-cli 0.146.0 | `source=startup` under `codex exec`, token quoted back | Not reachable from a tracked project registration; see the limit below | `codex exec resume --last` reports `source=resume` |
 | Pi | 0.82.0 | `source=startup`, token quoted back in both `-p` and the TUI | `/new` raises `session_start` reason `new`, which the extension maps to `clear`; `/compact` raises `session_compact`, and both freshly injected source-stamped tokens were quoted back | `pi -c` reports reason `startup`, not `resume` |
 
+### Session identity behind the fleet lock
+
+The fleet lock records which session acquired it, because process ancestry is not a stable session identity: Claude Code serves one session's hooks and tool calls from more than one worker pool, and a pool whose top process is reparented to init yields a contiguous harness run that never reaches the session's own lineage.
+Whether the harness supplies a usable identity at all is vendor behavior, so it was measured on 2026-08-15 against Claude Code 2.1.232 and 2.1.233 in a throwaway lab whose only `SessionStart` hook logged the delivered payload, the exported environment, and the full process ancestry.
+
+Six session opens were recorded, covering every source the run tier routes on.
+
+| Source | Delivery | `CLAUDE_PID` | Session process | Hook's parent | Ancestry resolves to |
+| --- | --- | --- | --- | --- | --- |
+| `startup` | 2.1.233 headless `-p` | 26545 | 26545 | 26545 | 26545 |
+| `startup` | 2.1.233 interactive | 37003 | 37003 | 37003 | 37003 |
+| `compact` | 2.1.233 interactive `/compact` | 37003 | 37003 | 37003 | 37003 |
+| `startup` | 2.1.232 interactive | 72191 | 72191 | 72191 | 72191 |
+| `clear` | 2.1.232 `/clear` | 72191 | 72191 | 72191 | 72191 |
+| `resume` | 2.1.232 `--continue` | 19340 | 19340 | 19340 | 19340 |
+
+Two facts hold across all six, and both are what the durable binding rests on.
+Every payload carried a `session_id`, byte-equal to the `CLAUDE_CODE_SESSION_ID` the session exported, with no mismatch.
+`CLAUDE_PID` named the session process itself, and the hook command ran as a direct child of that process.
+
+The second fact bounds the defect rather than describing it: on this path ancestry already reaches the session, so a foreground session is never refused its own lock at its own session open.
+The refusal observed in the field came from a session hosted in a Claude Code background job, whose calls are served by a reparented pool (`claude bg-spare` under `claude bg-pty-host`, itself reparented to init) that stops short of the lock owner.
+That is why the binding is required and why `CLAUDE_PID` equality alone would not answer it: from that pool `CLAUDE_PID` names the pool process, not the pid the lock records.
+It remains load-bearing as corroboration, since a session identity inherited through the environment can otherwise be replayed by any process the session launched.
+
+`tests/fm-session-lock-identity.test.sh` pins the resulting logic portably with a deterministic process table, verified on 2026-08-15 under both GNU bash 3.2.57 on Darwin 25.6.0 and GNU bash 5.3.9 on aarch64 Alpine.
+`tests/fm-sessionstart-hook-live-e2e.test.sh` refreshes the vendor half of this record; run it after every Claude Code upgrade before trusting the table above.
+Its 2026-08-15 run against Claude Code 2.1.233 checked five real session opens and found a corroborated session identity on every one:
+
+```text
+# claude 2.1.233 (Claude Code): session identity usable on 5 session-open(s)
+ok - claude 2.1.233 (Claude Code): every session open carries a corroborated session identity for the fleet lock
+```
+
 Two harness-specific consequences are load-bearing rather than incidental.
 
 Codex's interactive TUI fired no project `SessionStart` hook at all in the same lab where `codex exec` fired it reliably, which matches the earlier 2026-07-28 finding for 0.145.0.
