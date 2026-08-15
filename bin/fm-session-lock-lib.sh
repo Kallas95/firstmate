@@ -2,7 +2,10 @@
 # Shared session-lock harness identity.
 #
 # ONE owner of the "which verified-harness process holds this home's session
-# lock, and does the current process descend from that same harness?" decision.
+# lock, and does the current process descend from that same harness?" decision,
+# and of the durable session-identity binding that answers the same ownership
+# question when ancestry cannot - a call served by a reparented worker pool
+# never reaches its own session. See fm_session_lock_owned_by_current_session.
 # bin/fm-lock.sh uses it to acquire and inspect state/.lock;
 # bin/fm-claude-stop-autoarm.sh uses it to prove a Stop hook fires inside the
 # lock-owning primary session before it may arm or rewake.
