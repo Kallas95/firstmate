@@ -1,7 +1,8 @@
 #!/usr/bin/env bash
 # Behavior tests for the muse (Muse Code) crewmate adapter: harness detection,
 # spawn launch shape and credential preflight, the secondmate refusal, the
-# session-log busy source, and teardown cleanup of the busy binding.
+# session-log busy source, the spawn refusal when that binding cannot be
+# recorded, and teardown cleanup of the busy binding.
 #
 # The session-log fixtures below reproduce muse 0.1.0-R708.1's real record
 # shapes, including the nested "record":{"kind":"terminal"} cleanup payload that

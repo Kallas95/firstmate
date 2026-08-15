@@ -7,6 +7,11 @@
 # the OpenCode plugin) in a plain Node host, so the artifact, the real
 # bin/fm-busy-event.sh writer, and the real classifier are exercised together
 # with no live harness session.
+#
+# The suite also covers the launch-path precondition for that wiring: a spawn
+# that cannot publish its task record must refuse before any agent starts, so
+# no unrecorded worker exists for a busy source to bind to. That case stops at
+# the spawn itself and drives no adapter artifact.
 set -u
 
 # shellcheck source=tests/lib.sh
