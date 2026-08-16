@@ -225,12 +225,21 @@ function pushDestination(value) {
   return destination.replace(/^refs\/heads\//, "");
 }
 
+function isRebasingPull(value) {
+  if (value === "-r" || value === "--rebase") return true;
+  if (value.startsWith("--rebase=")) return value.slice("--rebase=".length) !== "false";
+  return false;
+}
+
 function classifyGit(position) {
   const index = gitSubcommandIndex(position.words, position.index + 1);
   const subcommand = position.words[index]?.value;
   if (!subcommand) return ALLOW;
   const rest = position.words.slice(index + 1).map((word) => word.value);
   if (subcommand === "rebase") return deny("history-rewrite");
+  // `git pull --rebase` replays the task branch exactly as `git rebase` does,
+  // without naming the refused subcommand. The negated spellings do not.
+  if (subcommand === "pull" && rest.some(isRebasingPull)) return deny("history-rewrite");
   if (subcommand === "config" && rest.some((value) => value === "--global" || value.startsWith("--global="))) {
     return deny("global-git-config");
   }
@@ -345,19 +354,27 @@ function carriedPrograms(position) {
 // one. eval runs the concatenation of its arguments, so it is classified the way
 // an inline shell payload is.
 function evalPayload(position) {
-  const words = position.words.slice(position.index + 1);
+  let words = position.words.slice(position.index + 1);
+  if (words[0]?.value === "--") words = words.slice(1);
   if (words.length === 0) return "";
   if (words.some((word) => !word.literal || word.subs.length > 0)) return "";
   return words.map((word) => word.value).join(" ");
 }
 
-// The payload of `sh -c '<program>'`, or "" when this is not such an invocation.
+// The payload of `sh -c '<program>'`. `carried` says the invocation asked for an
+// inline program at all, so an unreadable one can be told apart from a shell
+// running a script. The option letter may sit anywhere in a short cluster
+// (`sh -cx`, `sh -xc`), and an end-of-options marker may stand between the
+// option and its program (`bash -c -- '<program>'`).
 function shellPayload(position) {
   const words = position.words;
   for (let index = position.index + 1; index < words.length; index += 1) {
-    if (/^-[a-zA-Z]*c$/.test(words[index].value)) return words[index + 1]?.value ?? "";
+    if (!/^-[A-Za-z]*c[A-Za-z]*$/.test(words[index].value)) continue;
+    let payload = index + 1;
+    if (words[payload]?.value === "--") payload += 1;
+    return { carried: true, payload: words[payload]?.value ?? "" };
   }
-  return "";
+  return { carried: false, payload: "" };
 }
 
 function classifyCommand(command, depth) {
@@ -449,10 +466,12 @@ function classifyNode(node, depth) {
   }
 
   if (SHELLS.has(name)) {
-    const payload = shellPayload(position);
+    const { carried, payload } = shellPayload(position);
     if (payload) {
       const nested = classifyCommand(payload, depth + 1);
       if (nested.decision === "deny") return nested;
+    } else if (carried && mentionsPerimeter(position.words)) {
+      return deny("unclassifiable-perimeter-command");
     }
   }
 

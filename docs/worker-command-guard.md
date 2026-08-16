@@ -31,7 +31,7 @@ Stated here for readers; the policy owner's rule tables are authoritative.
 - `ssh`, `scp`, `rsync` - reaching or moving data to another host.
 - `chmod` - host file modes.
 - `git config --global` - the captain's host-wide git configuration.
-- `git rebase` - history the delivery path depends on.
+- `git rebase`, and `git pull --rebase` which replays the same way - history the delivery path depends on.
 - `git push` whose destination ref resolves to `master` or `main`. Pushing the task branch, including `git push origin HEAD`, is deliberately untouched: work lands through a PR, so the ordinary push must keep working.
 - Reading a file whose basename is exactly `.env`, or carrying one elsewhere as the source of a copy or a move, through a shell command or through a harness file tool.
 
@@ -67,11 +67,12 @@ The perimeter applies to the command [`bin/fm-arm-command-policy.mjs`](../bin/fm
 Any other launcher swallows the command behind it, so `nice chmod +x a`, `nice -n 10 chmod +x a`, `stdbuf -o0 chmod +x a` and `setsid chmod +x a` are allowed today, while `nohup chmod +x a` and `timeout 5 chmod +x a` are refused.
 Extending that set is deliberately not done here: it is shared with the arm guard and the cd guard, whose behaviour is outside this change's scope.
 
-**Paths produced at runtime.**
-The policy reads literal operands, so a path the command only receives while running is invisible to it.
+**Paths and payloads produced at runtime.**
+The policy reads literal operands, so a path or a program the command only receives while running is invisible to it.
 `find . -name .env -exec cat {} \;` and `find . -name .env | xargs cat` are allowed, because `.env` is a filter pattern there and `{}` is a placeholder - no operand names the file - while `cat .env` is refused.
 Refusing on the mere presence of the text would be worse: it would refuse `find . -name .env`, an ordinary search, and contradict the principle stated below that the guard never blocks work it has no opinion about.
-This is the same limit as a filename held in a variable, which no static classifier can close.
+The same limit covers a filename or a command held in a variable, such as `sh -c "$CMD"`, which no static classifier can close.
+An inline shell or `eval` payload is classified whenever it is literal, in any option spelling; when it is assembled at runtime instead, a node that still mentions a perimeter command is refused rather than allowed.
 
 **The bodies of scripts a submitted command would run.**
 The policy classifies the command a worker submits.

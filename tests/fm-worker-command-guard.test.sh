@@ -140,6 +140,21 @@ matrix_case D77 deny protected-branch-push 'git push --all origin'
 matrix_case D78 deny protected-branch-push 'git push --mirror origin'
 matrix_case D79 deny protected-branch-push 'git push origin --all'
 matrix_case D80 deny protected-branch-push 'git push --all'
+# Pulling with rebase replays the task branch exactly as the refused subcommand
+# does, and it is what a worker types to resynchronise with the default branch.
+matrix_case D81 deny history-rewrite 'git pull --rebase origin main'
+matrix_case D82 deny history-rewrite 'git pull -r origin main'
+matrix_case D83 deny history-rewrite 'git pull --rebase'
+matrix_case D84 deny history-rewrite 'git pull --rebase=merges'
+# The inline-shell option letter can sit anywhere in a short cluster, and an
+# end-of-options marker can stand between the option and its program.
+matrix_case D85 deny permission-change 'sh -cx "chmod +x a"'
+matrix_case D86 deny dotenv-access 'bash -c -- "cat .env"'
+matrix_case D87 deny dotenv-access 'eval -- "cat .env"'
+matrix_case D88 deny permission-change 'sh -xc "chmod +x a"'
+matrix_case D89 deny permission-change 'bash -lc "chmod +x a"'
+matrix_case D90 deny permission-change 'bash --norc -c "chmod +x a"'
+matrix_case D91 deny remote-transfer 'bash -o pipefail -c "ssh host uptime"'
 
 # ALLOW: ordinary worker work, including the push form the delivery path needs.
 matrix_case A01 allow - 'git push origin HEAD'
@@ -211,6 +226,16 @@ matrix_case A47 allow - 'printf "K=v\n" >> .env'
 # word used as data, into a refusal.
 matrix_case A48 allow - 'if true; then time -o log git status; fi'
 matrix_case A49 allow - 'for f in a; do time -p echo "git is fine"; done'
+# The negated spellings do not replay anything, and a plain pull is ordinary
+# work that must keep running.
+matrix_case A50 allow - 'git pull --no-rebase origin main'
+matrix_case A51 allow - 'git pull --rebase=false'
+matrix_case A52 allow - 'git pull origin main'
+matrix_case A53 allow - 'git pull --ff-only origin main'
+# A shell running an ordinary inline program, in the same spellings.
+matrix_case A54 allow - 'sh -cx "npm test"'
+matrix_case A55 allow - 'bash -c -- "npm run build"'
+matrix_case A56 allow - 'eval -- "npm test"'
 
 MATRIX_TMP=$(mktemp -d "${TMPDIR:-/tmp}/fm-worker-guard-matrix.XXXXXX")
 FM_TEST_CLEANUP_DIRS+=("$MATRIX_TMP")
