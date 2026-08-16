@@ -1545,8 +1545,26 @@ test_hook_claude_mode_dead_away_daemon_keeps_the_bounded_progression() {
   out=$(FM_CLAUDE_AUTOARM_SYNC_WAIT_MS=100 run_hook_claude "$dir" true); status=$?
   expect_code 0 "$status" "a flagged-but-dead away mode must reach the same verified attended fail-open"
   assert_contains "$out" 'FIRSTMATE SUPERVISION IS GENUINELY DOWN' "the attended fail-open notice is missing"
+  # This is the one path the away-mode flag makes reachable, so it must name the
+  # broken away mode and must not ask for an attendant the flag says is gone.
+  assert_contains "$out" 'AWAY MODE IS FLAGGED BUT ITS DAEMON IS NOT RUNNING' \
+    "the fail-open notice did not name the away mode that is supervising nothing"
+  assert_contains "$out" 'restart the away-mode daemon or exit away mode' \
+    "the fail-open notice did not name the only repair available in away mode"
+  assert_not_contains "$out" 'Keep this session attended' \
+    "the fail-open asked for an attendant on a home whose flag says the captain left"
   assert_present "$dir/state/.claude-autoarm-failure-alarmed" "the bounded fail-open did not consume its episode alarm"
   assert_present "$dir/state/.afk" "the guard must never clear the captain's away-mode flag"
+
+  # Symmetric control: with no away mode the notice is unchanged.
+  dir=$(make_primary_dir "$TMP_ROOT/hook-claude-alarm-no-afk")
+  : > "$dir/state/task1.meta"
+  seed_claude_failure "$dir"
+  seed_claude_budget "$dir" 3
+  out=$(FM_CLAUDE_AUTOARM_SYNC_WAIT_MS=100 run_hook_claude "$dir" true); status=$?
+  expect_code 0 "$status" "a home with no away mode must still reach the attended fail-open"
+  assert_contains "$out" 'Keep this session attended' "the ordinary fail-open lost its attendance instruction"
+  assert_not_contains "$out" 'AWAY MODE IS FLAGGED' "a home with no away mode was told its away mode is broken"
   pass "fm-turnend-guard --claude: a flagged-but-dead away mode keeps the ordinary bounded progression"
 }
 

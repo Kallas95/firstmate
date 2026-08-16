@@ -16,7 +16,8 @@
 # injects ONLY when the durable away-mode flag state/.afk is present. Invoking
 # the /afk skill sets that flag and starts this daemon; any real (unmarked)
 # user message clears it and firstmate resumes full responsiveness.
-# When afk is off, normal fm-watch.sh always-on triage is the active mechanism.
+# Whenever no LIVE daemon holds this home, normal fm-watch.sh always-on triage is
+# the active mechanism - including under a flag whose daemon died.
 # Any buffered daemon escalations that remain while afk is off survive in
 # state/.subsuper-escalations and are flushed on the next "while you were out"
 # catch-up or when afk is re-entered.
