@@ -126,6 +126,20 @@ matrix_case D67 deny dotenv-access 'time -p cat .env'
 matrix_case D68 deny protected-branch-push 'time -p git push origin main'
 matrix_case D69 deny permission-change 'for f in a; do time -p chmod +x $f; done'
 matrix_case D70 deny dotenv-access 'if true; then time -p cat .env; fi'
+# The keyword's option can take its value in a separate token, which then stands
+# where the command should be, so the real command must still be classified.
+matrix_case D71 deny permission-change '/usr/bin/time -o log chmod +x a'
+matrix_case D72 deny permission-change 'time -f "%e" chmod +x a'
+matrix_case D73 deny dotenv-access 'time -a -o log cat .env'
+matrix_case D74 deny dotenv-access 'time --output log cat .env'
+matrix_case D75 deny permission-change 'for f in a; do time -o log chmod +x $f; done'
+matrix_case D76 deny remote-transfer 'if true; then time -o log ssh host uptime; fi'
+# Pushing every local branch or every ref carries master/main along without
+# naming either of them.
+matrix_case D77 deny protected-branch-push 'git push --all origin'
+matrix_case D78 deny protected-branch-push 'git push --mirror origin'
+matrix_case D79 deny protected-branch-push 'git push origin --all'
+matrix_case D80 deny protected-branch-push 'git push --all'
 
 # ALLOW: ordinary worker work, including the push form the delivery path needs.
 matrix_case A01 allow - 'git push origin HEAD'
@@ -184,6 +198,19 @@ matrix_case A39 allow - 'git diff --stat'
 # Dropping the keyword's options must not start refusing ordinary timed work.
 matrix_case A40 allow - 'time -p npm test'
 matrix_case A41 allow - 'for f in *.md; do time -p wc -l $f; done'
+# A redirection target is not a command, so a compound command writing into an
+# ordinary file whose name merely contains a marker word, or into a destination
+# secrets file, must read exactly like the simple forms beside it.
+matrix_case A42 allow - 'while read -r l; do echo $l; done > /tmp/git.log'
+matrix_case A43 allow - 'for f in a; do echo $f; done > ssh.txt'
+matrix_case A44 allow - 'for f in a; do echo $f; done > .env'
+matrix_case A45 allow - 'for f in a; do echo $f; done >> .env'
+matrix_case A46 allow - 'if true; then echo ok; fi > .env'
+matrix_case A47 allow - 'printf "K=v\n" >> .env'
+# Dropping the keyword's options must not turn ordinary timed work, or a marker
+# word used as data, into a refusal.
+matrix_case A48 allow - 'if true; then time -o log git status; fi'
+matrix_case A49 allow - 'for f in a; do time -p echo "git is fine"; done'
 
 MATRIX_TMP=$(mktemp -d "${TMPDIR:-/tmp}/fm-worker-guard-matrix.XXXXXX")
 FM_TEST_CLEANUP_DIRS+=("$MATRIX_TMP")
@@ -449,6 +476,29 @@ else process.stdout.write("allow");
 EOF
 }
 
+# drive_pi_tool_call_losing_transport <ext-path> <fmroot> <json-input>: the real
+# post-launch scenario. The extension is loaded while the transport is still
+# there, so its load-time check passes, and only then does the transport go
+# away - which is what happens when the captain moves the firstmate checkout
+# under a running worker. Prints "allow" or "block\t<reason>".
+drive_pi_tool_call_losing_transport() {
+  EXT_PATH="$1" GUARD_PATH="$2/bin/fm-worker-pretool-check.sh" TOOL_INPUT="$3" node --input-type=module 2>&1 <<'EOF'
+import { pathToFileURL } from "node:url";
+import { rmSync } from "node:fs";
+const mod = await import(pathToFileURL(process.env.EXT_PATH).href);
+const handlers = {};
+mod.default({ on: (name, fn) => { handlers[name] = fn; } });
+rmSync(process.env.GUARD_PATH, { force: true });
+const result = await handlers["tool_call"]({
+  type: "tool_call",
+  toolName: "bash",
+  input: JSON.parse(process.env.TOOL_INPUT),
+});
+if (result && result.block) process.stdout.write("block\t" + String(result.reason || ""));
+else process.stdout.write("allow");
+EOF
+}
+
 test_pi_application_point() {
   local rec id=guard-pi-1 out state ext
   rec=$(make_spawn_case pi-guard pi "$id")
@@ -500,15 +550,24 @@ test_pi_worker_without_the_guard_is_refused() {
   state="$HOME_DIR/state"
   ext="$state/$id.pi-ext.ts"
 
-  # The guard disappears after launch: every tool call must be refused loudly
-  # rather than silently running unguarded.
+  # The transport goes away while the worker is still running, so the extension
+  # loaded with it present and only the tool call finds it gone. This is the
+  # scenario the captain actually creates by moving the firstmate checkout.
+  out=$(drive_pi_tool_call_losing_transport "$ext" "$FMROOT_DIR" '{"command":"echo ordinary work"}')
+  case "$out" in
+    block*worker-guard-unavailable*) ;;
+    *) fail "a Pi worker that loses its guard mid-run must be refused loudly, got: $out" ;;
+  esac
+
+  # The transport is already gone when the extension loads: the other branch of
+  # the same guarantee.
   remove_guard_transport "$FMROOT_DIR"
   out=$(drive_pi_tool_call "$ext" '{"command":"echo ordinary work"}')
   case "$out" in
     block*worker-guard-unavailable*) ;;
-    *) fail "a Pi worker whose guard vanished must be refused loudly, got: $out" ;;
+    *) fail "a Pi worker loading without its guard must be refused loudly, got: $out" ;;
   esac
-  pass "worker guard: a Pi worker whose guard is absent is refused, never silently permissive"
+  pass "worker guard: a Pi worker whose guard is absent is refused, whether it vanished before or after load"
 }
 
 test_spawn_refuses_when_guard_runtime_is_missing() {

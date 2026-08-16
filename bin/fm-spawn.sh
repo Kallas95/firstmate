@@ -2518,13 +2518,18 @@ const busyEvent = (state: string, event: string) =>
 // every call with a loud reason instead of leaving the worker unprotected.
 const guardScript = "$FM_ROOT/bin/fm-worker-pretool-check.sh";
 const guardMissing = !existsSync(guardScript);
+// One reason for both ways the transport can be gone: absent when this
+// extension loaded, or removed while the worker was still running, where the
+// failure surfaces as a spawn error rather than an exit status.
+const guardUnavailable = "[worker-guard-unavailable] the firstmate worker command guard is missing at "
+  + guardScript + ", so this worker has no command perimeter. Report this to firstmate; do not work around it.";
 const guardCheck = (args: string[]) =>
   new Promise<{ code: number; reason: string }>((resolve) => {
     execFile(guardScript, args, (error: any, _stdout: any, stderr: any) => {
       const reason = String(stderr || "").trim();
       if (!error) return resolve({ code: 0, reason: "" });
       if (typeof error.code === "number") return resolve({ code: error.code, reason });
-      resolve({ code: -1, reason: reason || String(error.message || "the worker command guard could not be run") });
+      resolve({ code: -1, reason: reason || guardUnavailable });
     });
   });
 export default function (pi: any) {
@@ -2542,13 +2547,7 @@ export default function (pi: any) {
       : (typeof input.file_path === "string" ? input.file_path : "");
     const tool = event && typeof event.toolName === "string" ? event.toolName : "";
     if (!command && !path) return {};
-    if (guardMissing) {
-      return {
-        block: true,
-        reason: "[worker-guard-unavailable] the firstmate worker command guard is missing at " + guardScript
-          + ", so this worker has no command perimeter. Report this to firstmate; do not work around it.",
-      };
-    }
+    if (guardMissing) return { block: true, reason: guardUnavailable };
     const args: string[] = [];
     if (command) args.push("--command", command);
     if (path) args.push("--path", path);

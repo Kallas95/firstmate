@@ -236,6 +236,9 @@ function classifyGit(position) {
   }
   if (subcommand === "push") {
     for (const value of rest) {
+      // --all pushes every local branch and --mirror every ref, so both carry
+      // master/main along without ever naming them.
+      if (value === "--all" || value === "--mirror") return deny("protected-branch-push");
       if (isOption(value)) continue;
       const destination = pushDestination(value);
       if (destination === "master" || destination === "main") return deny("protected-branch-push");
@@ -271,18 +274,34 @@ function redirectionReadsDotenv(tokens) {
 //
 // A keyword can carry its own options - `time -p chmod +x a` - and neither a
 // compound body nor a timing keyword can legitimately begin with one, so once a
-// keyword has been dropped the options that follow it are dropped too.
+// keyword has been dropped the options that follow it are dropped too. An option
+// whose value sits in a SEPARATE token leaves that value in command position
+// (`time -o log chmod +x a` resolves to `log`), which is why a node that dropped
+// an option has each of its remaining operands classified as a command too.
 function withoutLeadingKeywords(tokens) {
   let start = 0;
-  let dropped = false;
+  let keywordDropped = false;
+  let optionDropped = false;
   while (tokens[start]?.type === "word") {
     const value = tokens[start].value;
-    const keyword = value === "!" || SHELL_RESERVED_WORDS.has(basename(value));
-    if (!keyword && !(dropped && isOption(value))) break;
-    dropped = true;
+    const reserved = value === "!" || SHELL_RESERVED_WORDS.has(basename(value));
+    if (!reserved && !(keywordDropped && isOption(value))) break;
+    if (reserved) keywordDropped = true;
+    else optionDropped = true;
     start += 1;
   }
-  return start === 0 ? tokens : tokens.slice(start);
+  return {
+    body: start === 0 ? tokens : tokens.slice(start),
+    dropped: tokens.slice(0, start),
+    optionDropped,
+  };
+}
+
+// Whether any of these words names something inside the perimeter. Redirection
+// targets are deliberately absent from what commandPosition returns, so an
+// ordinary `done > /tmp/git.log` is never mistaken for a perimeter mention.
+function mentionsPerimeter(words) {
+  return words.some((word) => PERIMETER_MARKERS.test(word.value));
 }
 
 // The command each carrier tool runs out of its own arguments, as token lists
@@ -374,7 +393,7 @@ function classifyNode(node, depth) {
   }
   if (redirectionReadsDotenv(node)) return deny("dotenv-access");
 
-  const body = withoutLeadingKeywords(node);
+  const { body, dropped, optionDropped } = withoutLeadingKeywords(node);
   const position = commandPosition(body);
 
   // A nested program runs whatever it contains, so every place the shared
@@ -405,10 +424,10 @@ function classifyNode(node, depth) {
     // A wrapper option the shared classifier could not resolve, or a keyword
     // whose body reduced to nothing, can hide the real command position, so a
     // node that mentions the perimeter and resolves to no command is refused
-    // rather than skipped. The whole node is searched, not the stripped body,
-    // because the marker may sit in what was dropped.
-    const unresolved = position.unresolvedWrapperOption || body !== node;
-    if (unresolved && node.some((token) => token.type === "word" && PERIMETER_MARKERS.test(token.value))) {
+    // rather than skipped. What was dropped is searched too, because the marker
+    // may sit there.
+    const unresolved = position.unresolvedWrapperOption || dropped.length > 0;
+    if (unresolved && mentionsPerimeter([...dropped, ...position.words])) {
       return deny("unclassifiable-perimeter-command");
     }
     return ALLOW;
@@ -442,7 +461,7 @@ function classifyNode(node, depth) {
     if (payload) {
       const nested = classifyCommand(payload, depth + 1);
       if (nested.decision === "deny") return nested;
-    } else if (position.words.some((word) => PERIMETER_MARKERS.test(word.value))) {
+    } else if (mentionsPerimeter(position.words)) {
       return deny("unclassifiable-perimeter-command");
     }
   }
@@ -450,6 +469,17 @@ function classifyNode(node, depth) {
   for (const carried of carriedPrograms(position)) {
     const nested = classifyNode(carried, depth + 1);
     if (nested.decision === "deny") return nested;
+  }
+
+  // A dropped option may have carried its value in the next token, which then
+  // stands where the command should be, so every later operand is classified as
+  // a command in turn rather than trusting one option spelling to say which.
+  if (optionDropped) {
+    for (let index = position.index + 1; index < position.words.length; index += 1) {
+      if (isOption(position.words[index].value)) continue;
+      const nested = classifyNode(position.words.slice(index), depth + 1);
+      if (nested.decision === "deny") return nested;
+    }
   }
   return ALLOW;
 }
