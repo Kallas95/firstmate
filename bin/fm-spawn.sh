@@ -1258,6 +1258,44 @@ case "$HARNESS" in
     ;;
 esac
 
+# Worker command guard (docs/worker-command-guard.md). A crewmate or scout runs
+# unattended with approvals disabled, so its perimeter is a PreToolUse seatbelt
+# wired per task below: the Pi extension and the Claude settings file both call
+# bin/fm-worker-pretool-check.sh, which calls the single policy owner
+# bin/fm-worker-command-policy.mjs. Launching a worker whose guard runtime is
+# missing would hand it a silently unguarded shell, so the spawn refuses here
+# instead. Secondmates are firstmate instances rather than unattended workers
+# and keep their own supervised posture, so the guard is not wired for them.
+if [ "$KIND" != secondmate ]; then
+  case "$HARNESS" in
+    claude*|pi|pi-signed)
+      [ -x "$FM_ROOT/bin/fm-worker-pretool-check.sh" ] || {
+        echo "error: the worker command guard transport is missing or not executable at $FM_ROOT/bin/fm-worker-pretool-check.sh; a $HARNESS worker must not launch without it" >&2
+        exit 1
+      }
+      [ -f "$FM_ROOT/bin/fm-worker-command-policy.mjs" ] || {
+        echo "error: the worker command guard policy owner is missing at $FM_ROOT/bin/fm-worker-command-policy.mjs; a $HARNESS worker must not launch without it" >&2
+        exit 1
+      }
+      command -v node >/dev/null 2>&1 || {
+        echo "error: the worker command guard needs node to classify a tool call and node is not on PATH; a $HARNESS worker must not launch without it" >&2
+        exit 1
+      }
+      # Claude delivers the tool call as JSON on stdin, which the transport
+      # reads with jq. Without jq every Claude tool call would hit the guard's
+      # fail-closed path, so refuse at launch with the real reason instead.
+      case "$HARNESS" in
+        claude*)
+          command -v jq >/dev/null 2>&1 || {
+            echo "error: the worker command guard needs jq to read Claude's tool-call payload and jq is not on PATH; a claude worker must not launch without it" >&2
+            exit 1
+          }
+          ;;
+      esac
+      ;;
+  esac
+fi
+
 # config/secondmate-harness may carry optional model/effort tokens alongside the
 # harness ("<harness> [<model>] [<effort>]"). They apply only when this is a
 # --secondmate spawn and no explicit per-spawn harness/raw launch was supplied, so
@@ -2355,8 +2393,15 @@ if [ "$KIND" != secondmate ]; then
       j_stop=$(json_escape "touch $(shell_quote "$TURNEND"); $busy_cmd_prefix idle $busy_suffix --event stop 2>/dev/null || true")
       j_stopfail=$(json_escape "$busy_cmd_prefix idle $busy_suffix --event stop-failure 2>/dev/null || true")
       j_sessionend=$(json_escape "$busy_cmd_prefix idle $busy_suffix --event session-end 2>/dev/null || true")
+      # Worker command guard (docs/worker-command-guard.md): the Claude
+      # application point of the perimeter owned by
+      # bin/fm-worker-command-policy.mjs. It restates no rule - it calls the same
+      # transport the Pi application point calls, so the two cannot drift apart.
+      # The path is absolute because a crewmate's worktree is the PROJECT, not
+      # firstmate, so $CLAUDE_PROJECT_DIR does not reach firstmate's bin/.
+      j_guard=$(json_escape "exec $(shell_quote "$FM_ROOT/bin/fm-worker-pretool-check.sh") --claude")
       cat > "$WT/.claude/settings.local.json" <<EOF
-{"hooks":{"UserPromptSubmit":[{"hooks":[{"type":"command","command":"$j_submit"}]}],"Stop":[{"hooks":[{"type":"command","command":"$j_stop"}]}],"StopFailure":[{"hooks":[{"type":"command","command":"$j_stopfail"}]}],"SessionEnd":[{"hooks":[{"type":"command","command":"$j_sessionend"}]}]}}
+{"hooks":{"UserPromptSubmit":[{"hooks":[{"type":"command","command":"$j_submit"}]}],"PreToolUse":[{"matcher":"Bash|Read|Edit|Write|NotebookEdit","hooks":[{"type":"command","command":"$j_guard"}]}],"Stop":[{"hooks":[{"type":"command","command":"$j_stop"}]}],"StopFailure":[{"hooks":[{"type":"command","command":"$j_stopfail"}]}],"SessionEnd":[{"hooks":[{"type":"command","command":"$j_sessionend"}]}]}}
 EOF
       exclude_path '.claude/settings.local.json'
       ;;
@@ -2429,12 +2474,32 @@ EOF
 // tool calls) and stays a wake NOTIFICATION touch for the watcher, never
 // current-state truth.
 import { execFile } from "node:child_process";
+import { existsSync } from "node:fs";
 const busyEvent = (state: string, event: string) =>
   new Promise<void>((resolve) => {
     execFile("$FM_ROOT/bin/fm-busy-event.sh", [
       "apply", "$STATE_REAL", "$ID", state,
       "--gen", "$BUSY_GEN", "--source", "pi-ext", "--event", event,
     ], () => resolve());
+  });
+// Worker command guard (docs/worker-command-guard.md): the Pi application point
+// of the perimeter owned by bin/fm-worker-command-policy.mjs. Pi's tool_call
+// event is the only surface that can refuse a call before it runs, and it
+// blocks by returning {block: true}. This handler restates no rule: it hands the
+// command and path to the same transport the Claude application point calls, so
+// the two can never drift apart. It fails CLOSED - an unusable guard blocks the
+// call rather than allowing it, and a guard that is missing at load time blocks
+// every call with a loud reason instead of leaving the worker unprotected.
+const guardScript = "$FM_ROOT/bin/fm-worker-pretool-check.sh";
+const guardMissing = !existsSync(guardScript);
+const guardCheck = (args: string[]) =>
+  new Promise<{ code: number; reason: string }>((resolve) => {
+    execFile(guardScript, args, (error: any, _stdout: any, stderr: any) => {
+      const reason = String(stderr || "").trim();
+      if (!error) return resolve({ code: 0, reason: "" });
+      if (typeof error.code === "number") return resolve({ code: error.code, reason });
+      resolve({ code: -1, reason: reason || String(error.message || "the worker command guard could not be run") });
+    });
   });
 export default function (pi: any) {
   pi.on("agent_start", () => busyEvent("busy", "agent-start"));
@@ -2443,6 +2508,27 @@ export default function (pi: any) {
     return busyEvent("idle", "agent-settled");
   });
   pi.on("turn_end", () => execFile("touch", ["$TURNEND"]));
+  pi.on("tool_call", async (event: any) => {
+    const input = (event && event.input) || {};
+    const command = typeof input.command === "string" ? input.command : "";
+    const path = typeof input.path === "string"
+      ? input.path
+      : (typeof input.file_path === "string" ? input.file_path : "");
+    if (!command && !path) return {};
+    if (guardMissing) {
+      return {
+        block: true,
+        reason: "[worker-guard-unavailable] the firstmate worker command guard is missing at " + guardScript
+          + ", so this worker has no command perimeter. Report this to firstmate; do not work around it.",
+      };
+    }
+    const args: string[] = [];
+    if (command) args.push("--command", command);
+    if (path) args.push("--path", path);
+    const result = await guardCheck(args);
+    if (result.code === 0) return {};
+    return { block: true, reason: result.reason || "denied by the firstmate worker command guard" };
+  });
 }
 EOF
       ;;
