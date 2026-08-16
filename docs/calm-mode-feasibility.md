@@ -32,7 +32,9 @@ The exported classes used by the adapters (`AssistantMessageComponent` and `Inte
 ### Built-in tool override constraints
 
 [`calm.md`](calm.md#pi-compatibility) owns the current user-facing collision behavior and limitation.
-Inspection of Pi 0.80.10 and 0.82.0 established that extensions override a built-in tool by registering the same name, the first registered extension wins the complete `ToolDefinition` without merging, and Pi exposes no unregister operation.
+Inspection of Pi 0.80.10 and 0.82.0, recorded on 2026-08-04, established that extensions override a built-in tool by registering the same name, the first registered extension wins the complete `ToolDefinition` without merging, and Pi exposes no unregister operation.
+That inspection has not been redone on 0.84.2, so the Pi registration behavior described here is unverified there.
+0.84.2's new `defaultTools` setting selects which built-ins Pi starts with and was not tested against Calm; the [2026-08-16 verification record](#2026-08-16-pi-0842-installed-version-verification) owns that gap.
 Pi loads project-local extensions before global or CLI-configured extensions, so Firstmate's tracked Calm extension previously won those collisions even when its persisted preference was off.
 The losing definition's execution and render functions are both discarded, so unconditionally registering Calm's wrappers would replace another extension's same-named tool rather than changing presentation alone.
 
