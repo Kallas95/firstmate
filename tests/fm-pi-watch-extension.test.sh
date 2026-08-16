@@ -1209,6 +1209,70 @@ EOF
   pass "OpenCode plugins have an explicit ESM boundary even under a typeless parent package"
 }
 
+# Away mode transfers watcher ownership to its daemon, so this plugin stands
+# down for it. It must stand down for a LIVE daemon only: the flag alone is a
+# declaration the host cannot invalidate when it kills the daemon, and standing
+# down on it would leave the home unsupervised and silent. The state itself is
+# proven in tests/fm-afk-launch.test.sh; what matters here is that the plugin
+# asks that owner rather than testing the flag, and which answer arms it.
+opencode_afk_stand_down_case() {  # <name> <status-line> <expect-arm 0|1>
+  local name=$1 status_line=$2 expect_arm=$3 plugin repo home log out status
+  plugin="$ROOT/.opencode/plugins/fm-primary-watch-arm.js"
+  repo="$TMP_ROOT/opencode-afk-$name-root"
+  home="$TMP_ROOT/opencode-afk-$name-home"
+  log="$TMP_ROOT/opencode-afk-$name.log"
+  mkdir -p "$repo/bin" "$home/state" "$home/config"
+  git init -q "$repo"
+  : > "$repo/AGENTS.md"
+  : > "$home/state/task.meta"
+  date '+%s' > "$home/state/.afk"
+  cat > "$repo/bin/fm-watch-arm.sh" <<SH
+#!/usr/bin/env bash
+printf 'armed\n' >> "\${FM_ARM_LOG:?}"
+printf 'watcher: healthy pid=1 (beacon 0s)\n'
+SH
+  cat > "$repo/bin/fm-afk-launch.sh" <<SH
+#!/usr/bin/env bash
+[ "\${1:-}" = status ] || exit 2
+printf '%s\n' '$status_line'
+SH
+  chmod +x "$repo/bin/fm-watch-arm.sh" "$repo/bin/fm-afk-launch.sh"
+  out=$(PLUGIN="$plugin" WORKTREE="$repo" FM_HOME="$home" FM_ARM_LOG="$log" node 2>&1 <<'EOF'
+import { existsSync, writeFileSync } from "node:fs";
+import { pathToFileURL } from "node:url";
+
+const mod = await import(pathToFileURL(process.env.PLUGIN).href);
+const client = { session: { promptAsync: async () => {} } };
+const hooks = await mod.FmPrimaryWatchArm({
+  client,
+  directory: process.env.WORKTREE,
+  worktree: process.env.WORKTREE,
+});
+writeFileSync(`${process.env.FM_HOME}/state/.lock`, `${process.pid}
+`);
+await hooks.event({ event: { type: "session.idle", properties: { sessionID: "session-test" } } });
+for (let i = 0; i < 100 && !existsSync(process.env.FM_ARM_LOG); i += 1) {
+  await new Promise((resolve) => setTimeout(resolve, 20));
+}
+console.log(existsSync(process.env.FM_ARM_LOG) ? "armed" : "inert");
+EOF
+)
+  status=$?
+  expect_code 0 "$status" "OpenCode away-mode case '$name' failed to run: $out"
+  if [ "$expect_arm" -eq 1 ]; then
+    assert_contains "$out" armed "OpenCode plugin stood down for away mode with no daemon behind it"
+  else
+    assert_contains "$out" inert "OpenCode plugin armed a second cycle against a live away daemon"
+  fi
+  assert_present "$home/state/.afk" "the plugin must never clear the captain's away-mode flag"
+}
+
+test_opencode_plugin_stands_down_only_for_a_live_away_daemon() {
+  opencode_afk_stand_down_case live daemon 0
+  opencode_afk_stand_down_case dead armed-no-daemon 1
+  pass "OpenCode watcher plugin stands down for a live away daemon and stays armed without one"
+}
+
 test_opencode_primary_watch_plugin_uses_effective_state_home() {
   local plugin repo home log out status
   plugin="$ROOT/.opencode/plugins/fm-primary-watch-arm.js"
@@ -2180,3 +2244,4 @@ test_opencode_established_empty_close_honors_retry_limit
 test_opencode_actionable_close_rechecks_session_lock
 test_opencode_watch_arm_coordinates_with_turnend_guard
 test_opencode_healthy_arm_output_does_not_suppress_guard
+test_opencode_plugin_stands_down_only_for_a_live_away_daemon

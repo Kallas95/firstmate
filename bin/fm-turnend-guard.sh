@@ -171,8 +171,7 @@ fi
 
 block_stop() {
   local afk x_mode reason rule
-  afk=0
-  [ -e "$STATE/.afk" ] && afk=1
+  afk=$(fm_afk_supervision_state "$STATE")
   x_mode=0
   [ -f "$CONFIG/x-mode.env" ] && x_mode=1
   reason=$("$SCRIPT_DIR/fm-supervision-instructions.sh" --afk "$afk" --x-mode "$x_mode" --repair-line 2>/dev/null \
@@ -346,7 +345,7 @@ terminal_fail_open() {
 
 failure_episode_verified() {
   local outcome
-  [ ! -e "$STATE/.afk" ] || return 1
+  ! fm_afk_daemon_owns_supervision "$STATE" || return 1
   [ -e "$FAILURE_NOTICE" ] || return 1
   outcome=$(sed -n 's/^.*outcome=\([a-z][a-z-]*\) .*$/\1/p' "$STATE/.claude-autoarm-epoch" 2>/dev/null || true)
   case "$outcome" in

@@ -266,7 +266,8 @@ unit_lock_initialization_grace() {
     sleep 0.15
     if [ -d "$st/state/.afk-launch.lock" ]; then
       printf '%s' "$$" > "$st/state/.afk-launch.lock/pid"
-      ( . "$ROOT/bin/fm-wake-lib.sh"; fm_pid_identity "$$" > "$st/state/.afk-launch.lock/pid-identity" 2>/dev/null ) || true
+      FM_STATE_OVERRIDE="$st/state" bash -c '. "$1"; fm_pid_identity "$2"' _ \
+    "$ROOT/bin/fm-wake-lib.sh" "$$" > "$st/state/.afk-launch.lock/pid-identity" 2>/dev/null || true
       # shellcheck disable=SC2031 # The subshell writes the path value; it does not reassign the variable.
       : > "$marker"
       sleep 0.15
@@ -480,6 +481,98 @@ unit_tmux_absence_distinguishes_probe_failure() {
   else
     fail "tmux absence: probe failure was treated as confirmed absence"
   fi
+  rm -rf "$st"
+}
+
+unit_afk_supervision_state() {
+  local st lock pid dead state
+  st=$(mktemp -d "${TMPDIR:-/tmp}/fm-afk-state.XXXXXX")
+  mkdir -p "$st/state"
+
+  state=$(FM_HOME="$st" FM_STATE_OVERRIDE="$st/state" "$LAUNCH" status 2>/dev/null)
+  if [ "$state" = off ]; then
+    pass "away state: no flag reports off"
+  else
+    fail "away state: no flag should report off, got '$state'"
+  fi
+
+  # Flag with a LIVE identity-matched daemon: away mode genuinely owns supervision.
+  date '+%s' > "$st/state/.afk"
+  sleep 600 &
+  pid=$!
+  lock="$st/state/.supervise-daemon.lock"
+  mkdir -p "$lock"
+  printf '%s\n' "$pid" > "$lock/pid"
+  FM_STATE_OVERRIDE="$st/state" bash -c '. "$1"; fm_pid_identity "$2"' _ \
+    "$ROOT/bin/fm-wake-lib.sh" "$pid" > "$lock/pid-identity" 2>/dev/null || true
+  state=$(FM_HOME="$st" FM_STATE_OVERRIDE="$st/state" "$LAUNCH" status 2>/dev/null)
+  if [ "$state" = daemon ]; then
+    pass "away state: flag plus a live identity-matched daemon reports daemon"
+  else
+    fail "away state: a live daemon should report daemon, got '$state'"
+  fi
+
+  # Same flag, same lock, dead pid: the measured defect state. The flag has not
+  # changed at all, so only daemon liveness can tell these two apart.
+  kill "$pid" 2>/dev/null || true
+  wait "$pid" 2>/dev/null || true
+  state=$(FM_HOME="$st" FM_STATE_OVERRIDE="$st/state" "$LAUNCH" status 2>/dev/null)
+  if [ "$state" = armed-no-daemon ]; then
+    pass "away state: an unchanged flag over a dead daemon reports armed-no-daemon"
+  else
+    fail "away state: a dead daemon should report armed-no-daemon, got '$state'"
+  fi
+
+  # A recorded pid that a different live process now owns must not pass as the
+  # daemon: identity, not pid liveness, is the proof.
+  sleep 600 &
+  dead=$!
+  printf '%s\n' "$dead" > "$lock/pid"
+  printf 'some other process identity\n' > "$lock/pid-identity"
+  state=$(FM_HOME="$st" FM_STATE_OVERRIDE="$st/state" "$LAUNCH" status 2>/dev/null)
+  kill "$dead" 2>/dev/null || true
+  wait "$dead" 2>/dev/null || true
+  if [ "$state" = armed-no-daemon ]; then
+    pass "away state: a live pid with a mismatched identity is not the daemon"
+  else
+    fail "away state: identity mismatch should report armed-no-daemon, got '$state'"
+  fi
+  rm -rf "$st"
+}
+
+unit_status_needs_no_lock() {
+  local st state
+  st=$(mktemp -d "${TMPDIR:-/tmp}/fm-afk-status-lock.XXXXXX")
+  mkdir -p "$st/state" "$st/state/.afk-launch.lock"
+  # A concurrent start holds the launcher lock. Learning whether anything is
+  # supervising must never wait behind it, so status takes no lock at all.
+  printf '%s\n' "$$" > "$st/state/.afk-launch.lock/pid"
+  ( . "$ROOT/bin/fm-wake-lib.sh"; fm_pid_identity "$$" > "$st/state/.afk-launch.lock/pid-identity" 2>/dev/null ) || true
+  state=$(FM_HOME="$st" FM_STATE_OVERRIDE="$st/state" "$LAUNCH" status 2>/dev/null)
+  if [ "$state" = off ]; then
+    pass "away state: status answers while another launcher holds the lock"
+  else
+    fail "away state: status blocked or misreported under a held launcher lock, got '$state'"
+  fi
+  rm -rf "$st"
+}
+
+unit_native_entry_reports_no_supervision_until_the_daemon_lands() {
+  local st state
+  st=$(mktemp -d "${TMPDIR:-/tmp}/fm-afk-native-claim.XXXXXX")
+  mkdir -p "$st/state"
+  # start-native writes the flag BEFORE the harness-native background job runs,
+  # and cannot wait for it. That entry must therefore never read as supervision:
+  # if the native job never starts, or the host reaps it, the home stays covered
+  # by normal harness supervision instead of standing it down for nothing.
+  FM_HOME="$st" FM_STATE_OVERRIDE="$st/state" "$LAUNCH" start-native >/dev/null 2>&1
+  state=$(FM_HOME="$st" FM_STATE_OVERRIDE="$st/state" "$LAUNCH" status 2>/dev/null)
+  if [ -e "$st/state/.afk" ] && [ "$state" = armed-no-daemon ]; then
+    pass "native entry: a prepared away mode with no daemon yet never claims supervision"
+  else
+    fail "native entry: expected flag present and armed-no-daemon, got '$state'"
+  fi
+  FM_HOME="$st" FM_STATE_OVERRIDE="$st/state" "$LAUNCH" stop >/dev/null 2>&1
   rm -rf "$st"
 }
 
@@ -939,6 +1032,9 @@ unit_record_failure_closes_terminal
 unit_readiness_failure_rolls_back_terminal
 unit_readiness_failure_preserves_unconfirmed_record
 unit_tmux_absence_distinguishes_probe_failure
+unit_afk_supervision_state
+unit_status_needs_no_lock
+unit_native_entry_reports_no_supervision_until_the_daemon_lands
 unit_native_lifecycle
 unit_native_entry_preserves_prepared_state
 unit_close_failure_preserves_record

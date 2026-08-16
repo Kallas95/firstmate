@@ -12,17 +12,20 @@ DOC_DIR="$REPO_ROOT/docs/supervision-protocols"
 
 HARNESS=
 READ_ONLY=0
-AFK=0
+AFK=off
 X_MODE=0
 REPAIR_LINE=0
 QUEUE_PENDING=0
 
 usage() {
   cat <<'EOF'
-Usage: fm-supervision-instructions.sh [--harness <name>] [--read-only 0|1] [--afk 0|1] [--x-mode 0|1] [--repair-line] [--queue-pending 0|1]
+Usage: fm-supervision-instructions.sh [--harness <name>] [--read-only 0|1] [--afk <state>] [--x-mode 0|1] [--repair-line] [--queue-pending 0|1]
 
 Print the current primary harness's supervision operating instructions.
 With --repair-line, print one concise repair instruction for guard and hook messages.
+--afk takes an away-mode supervision state from fm_afk_supervision_state
+(bin/fm-wake-lib.sh): off, daemon, or armed-no-daemon. Legacy 0 and 1 are
+accepted as off and daemon.
 EOF
 }
 
@@ -46,8 +49,13 @@ while [ "$#" -gt 0 ]; do
       shift 2
       ;;
     --afk)
-      [ "$#" -gt 1 ] || { echo "error: --afk requires 0 or 1" >&2; exit 2; }
-      AFK=$(bool_value "$2")
+      [ "$#" -gt 1 ] || { echo "error: --afk requires an away-mode state" >&2; exit 2; }
+      case "$2" in
+        off|daemon|armed-no-daemon) AFK=$2 ;;
+        1|true|TRUE|yes|YES) AFK=daemon ;;
+        0|false|FALSE|no|NO) AFK=off ;;
+        *) echo "error: --afk expects off, daemon, or armed-no-daemon" >&2; exit 2 ;;
+      esac
       shift 2
       ;;
     --x-mode)
@@ -120,8 +128,12 @@ repair_line() {
     printf '%s\n' 'Watcher repair belongs to the session holding the fleet lock; do not drain, arm, or repair from this read-only session.'
     return 0
   fi
-  if [ "$AFK" -eq 1 ]; then
+  if [ "$AFK" = daemon ]; then
     printf '%s\n' 'Away mode owns watcher supervision; load /afk and ensure the daemon is running instead of starting normal supervision directly.'
+    return 0
+  fi
+  if [ "$AFK" = armed-no-daemon ]; then
+    printf '%s\n' 'Away mode is flagged but its daemon is NOT running, so nothing owns supervision; load /afk to restart the daemon, or exit away mode - normal harness supervision stays armed until one of those happens.'
     return 0
   fi
 
@@ -199,8 +211,10 @@ if [ "$READ_ONLY" -eq 1 ]; then
 else
   printf '%s\n' '- Lock: held by this session; this session owns normal supervision unless away mode says otherwise.'
 fi
-if [ "$AFK" -eq 1 ]; then
+if [ "$AFK" = daemon ]; then
   printf '%s\n' '- Away mode: active; load /afk and keep normal harness supervision paused while the daemon owns the watcher.'
+elif [ "$AFK" = armed-no-daemon ]; then
+  printf '%s\n' '- Away mode: FLAGGED WITH NO DAEMON - state/.afk is set and no away-mode daemon is running, so away mode owns nothing; load /afk to restart the daemon or exit away mode, and keep normal harness supervision armed until then.'
 else
   printf '%s\n' '- Away mode: inactive.'
 fi

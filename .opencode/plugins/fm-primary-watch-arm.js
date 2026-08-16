@@ -101,8 +101,23 @@ async function isPrimaryRoot(root, home) {
   return gitDir.stdout.trim() === commonDir.stdout.trim();
 }
 
-function shouldArm(paths) {
-  if (existsSync(`${paths.state}/.afk`)) return false;
+// The away-mode flag is a declaration of intent, not proof of supervision: the
+// host can kill the daemon and leave the flag behind. Standing down on the flag
+// alone would leave the home with no watcher AND no alarm at once, so ask
+// bin/fm-afk-launch.sh - the single owner of that predicate - whether a daemon
+// is actually alive (docs/watcher-continuity.md "Away-mode stand-down"). An
+// unreadable answer keeps this plugin armed, which is the safe direction.
+async function afkDaemonOwnsSupervision(paths) {
+  if (!existsSync(`${paths.state}/.afk`)) return false;
+  const result = await runProcess(`${paths.root}/bin/fm-afk-launch.sh`, ["status"], {
+    env: { ...process.env, FM_HOME: paths.home, FM_STATE_OVERRIDE: paths.state },
+  });
+  if (result.code !== 0) return false;
+  return result.stdout.trim() === "daemon";
+}
+
+async function shouldArm(paths) {
+  if (await afkDaemonOwnsSupervision(paths)) return false;
   if (existsSync(`${paths.config}/x-mode.env`)) return true;
   try {
     return readdirSync(paths.state).some((name) => name.endsWith(".meta"));
@@ -401,7 +416,7 @@ async function beginArm(paths, sessionID, client, predecessorArmPid) {
   if (!(await sessionOwnsLock(paths))) return { status: "read-only", armChild: null };
   if (child) return { status: "existing", armChild: child };
   if (retryTimer) return { status: "retrying", armChild: null };
-  if (!shouldArm(paths)) return { status: "not-needed", armChild: null };
+  if (!(await shouldArm(paths))) return { status: "not-needed", armChild: null };
   return { status: "spawned", armChild: spawnArm(paths, sessionID, client, predecessorArmPid) };
 }
 

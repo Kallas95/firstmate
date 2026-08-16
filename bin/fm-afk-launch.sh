@@ -35,6 +35,15 @@
 #                              id, then clear state/.afk last.
 #   fm-afk-launch.sh reconcile Close a recorded-but-dead daemon terminal by exact
 #                              id and drop the record (recovery after a crash).
+#   fm-afk-launch.sh status    Print this home's away-mode supervision state -
+#                              off, daemon, or armed-no-daemon - and exit 0. Read
+#                              only: takes no lock and changes nothing. Exists
+#                              because the away-mode flag is a declaration, not
+#                              proof of supervision: only `daemon` means anything
+#                              is actually supervising, so this is what a native
+#                              background launch must confirm before it can be
+#                              called done, and what a non-bash caller (the
+#                              OpenCode plugin) reads instead of testing the flag.
 #
 # Supported backends: herdr, tmux. Others (zellij, orca, cmux) have no verified
 # non-visible-launch primitive here yet and refuse loudly.
@@ -79,10 +88,11 @@ FM_AFK_LAUNCH_WS_LABEL="firstmate-afk-daemon"
 . "$FM_AFK_LAUNCH_DIR/fm-backend.sh"
 # shellcheck source=bin/fm-supervisor-target-lib.sh
 . "$FM_AFK_LAUNCH_DIR/fm-supervisor-target-lib.sh"
-# fm-afk-start.sh provides the daemon-lock liveness helpers and
-# fm_afk_clear_stale_artifacts; it is sourceable (BASH_SOURCE guard) and its
-# main does not run on source. It sets `set -eu`, so turn errexit back off for
-# this script's best-effort flow immediately after.
+# fm-afk-start.sh provides fm_afk_clear_stale_artifacts and fm_afk_flag_write,
+# and sources bin/fm-wake-lib.sh for the shared away-mode daemon predicates; it
+# is sourceable (BASH_SOURCE guard) and its main does not run on source. It sets
+# `set -eu`, so turn errexit back off for this script's best-effort flow
+# immediately after.
 # shellcheck source=bin/fm-afk-start.sh
 . "$FM_AFK_LAUNCH_DIR/fm-afk-start.sh"
 set +e
@@ -146,7 +156,7 @@ fm_afk_launch_lock_release() {
 }
 
 fm_afk_launch_usage() {
-  sed -n '2,34p' "${BASH_SOURCE[0]}" | sed 's/^# \{0,1\}//'
+  sed -n '2,45p' "${BASH_SOURCE[0]}" | sed 's/^# \{0,1\}//'
 }
 
 # The command run inside the created terminal. Real launch runs the shared
@@ -285,7 +295,7 @@ fm_afk_launch_wait_ready() {  # <backend> <target>
   fi
   while [ "$attempt" -lt 100 ]; do
     attempt=$((attempt + 1))
-    daemon_lock_held_by_live_daemon && return 0
+    fm_afk_daemon_alive "$FM_AFK_LAUNCH_STATE" && return 0
     fm_afk_launch_terminal_alive "$backend" "$target" || return 1
     sleep 0.05
   done
@@ -342,7 +352,7 @@ fm_afk_launch_herdr_recover_created() {  # <session> <label>
 # owns it, close the leaked terminal by exact id and drop the record.
 fm_afk_launch_reconcile() {
   local read_result
-  if daemon_lock_held_by_live_daemon; then
+  if fm_afk_daemon_alive "$FM_AFK_LAUNCH_STATE"; then
     return 0
   fi
   fm_afk_launch_record_read
@@ -472,7 +482,7 @@ fm_afk_launch_start() {
 
   mkdir -p "$FM_AFK_LAUNCH_STATE"
 
-  if daemon_lock_held_by_live_daemon; then
+  if fm_afk_daemon_alive "$FM_AFK_LAUNCH_STATE"; then
     fm_afk_launch_record_validate_if_present || return 1
     if ! fm_afk_launch_flag_write; then
       fm_afk_launch_log "failed to refresh away-mode flag"
@@ -534,7 +544,7 @@ fm_afk_launch_start_native() {
     fm_afk_launch_log "return catch-up is still pending; run bin/fm-afk-return.sh check before re-entering away mode"
     return 1
   fi
-  if daemon_lock_held_by_live_daemon; then
+  if fm_afk_daemon_alive "$FM_AFK_LAUNCH_STATE"; then
     fm_afk_launch_record_validate_if_present || return 1
     fm_afk_launch_flag_write || return 1
     fm_afk_launch_log "daemon already running; refreshed away-mode flag"
@@ -570,6 +580,10 @@ fm_afk_launch_start_native() {
   return "$result"
 }
 
+fm_afk_launch_status() {
+  fm_afk_supervision_state "$FM_AFK_LAUNCH_STATE"
+}
+
 fm_afk_launch_stop() {
   local pid pid_identity current_identity result=0 read_result
   fm_afk_launch_record_read
@@ -583,8 +597,8 @@ fm_afk_launch_stop() {
   # first would make that flush a no-op via inject_msg's presence gate).
   pid=""
   pid_identity=""
-  if daemon_lock_held_by_live_daemon; then
-    pid=$(daemon_lock_pid 2>/dev/null) || return 1
+  if fm_afk_daemon_alive "$FM_AFK_LAUNCH_STATE"; then
+    pid=$(fm_afk_daemon_lock_pid "$FM_AFK_LAUNCH_STATE" 2>/dev/null) || return 1
     pid_identity=$(fm_pid_identity "$pid" 2>/dev/null) || return 1
   fi
   if [ -n "$pid" ]; then
@@ -631,6 +645,9 @@ fm_afk_launch_main() {
   # the lock directory, which then blocks the next away-mode launch until the
   # stale-owner reclaim path clears it. fm_afk_launch_lock_release only removes
   # a lock this process owns, so arming it before acquisition is safe.
+  case "${1:-start}" in
+    status) fm_afk_launch_status; return 0 ;;
+  esac
   trap fm_afk_launch_lock_release EXIT
   trap 'exit 130' INT
   trap 'exit 143' TERM

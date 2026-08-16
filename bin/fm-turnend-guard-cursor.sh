@@ -120,7 +120,8 @@ emit_followup() {  # <kind> <body> [reset-budget]
   fm_operational_input_encode "$kind" "$body" encoded || exit 0
   response=$(jq -n --arg m "$encoded" '{followup_message:$m}' 2>/dev/null) || exit 0
   lock_acquire_bounded "$OWNER_LOCK" || exit 0
-  if ! park_still_ours || ! current_session_still_ours || [ -e "$STATE/.afk" ]; then
+  if ! park_still_ours || ! current_session_still_ours \
+    || fm_afk_daemon_owns_supervision "$STATE"; then
     fm_lock_release "$OWNER_LOCK"
     exit 0
   fi
@@ -160,7 +161,8 @@ budget_reset() {
 
 budget_reset_if_ours() {
   lock_acquire_bounded "$OWNER_LOCK" || exit 0
-  if ! park_still_ours || ! current_session_still_ours || [ -e "$STATE/.afk" ]; then
+  if ! park_still_ours || ! current_session_still_ours \
+    || fm_afk_daemon_owns_supervision "$STATE"; then
     fm_lock_release "$OWNER_LOCK"
     exit 0
   fi
@@ -187,7 +189,8 @@ $reason"
   response=$(jq -n --arg m "$encoded" '{followup_message:$m}' 2>/dev/null) || exit 0
 
   lock_acquire_bounded "$OWNER_LOCK" || exit 0
-  if ! park_still_ours || ! current_session_still_ours || [ -e "$STATE/.afk" ]; then
+  if ! park_still_ours || ! current_session_still_ours \
+    || fm_afk_daemon_owns_supervision "$STATE"; then
     fm_lock_release "$OWNER_LOCK"
     exit 0
   fi
@@ -260,8 +263,11 @@ if [ "$LOOP_COUNT" -ge "$LOOP_CEILING" ]; then
   emit_followup turn-end-guard "FIRSTMATE SUPERVISION FOLLOW-UP CEILING REACHED - this session has taken $LOOP_COUNT consecutive hook-driven turns without a captain message, so automatic wake delivery stops here to bound the loop. Queued wakes stay durable: run bin/fm-wake-drain.sh, handle them, and run its exact WAKE_ACK_REQUIRED command. Supervision resumes automatically at the next turn end after the captain's next message."
 fi
 
-# Away mode owns the watcher and its own triage; never park and never wake.
-[ -e "$STATE/.afk" ] && exit 0
+# A LIVE away-mode daemon owns the watcher and its own triage; never park and
+# never wake for it. The flag alone never stands this park down: away mode with
+# a dead daemon supervises nothing, so the park stays the only cover
+# (docs/watcher-continuity.md "Away-mode stand-down").
+fm_afk_daemon_owns_supervision "$STATE" && exit 0
 
 if ! fm_supervision_needed "$STATE" "$GRACE"; then
   budget_reset_if_ours
@@ -299,9 +305,10 @@ while [ "$attempt" -lt "$ARM_ATTEMPTS" ]; do
   fi
   ARM_PID=$!
   while kill -0 "$ARM_PID" 2>/dev/null; do
-    # Stand down for either reason: a newer stop claimed the baton, or away mode
-    # started and its daemon now owns the watcher and all triage.
-    if ! park_still_ours || ! current_session_still_ours || [ -e "$STATE/.afk" ]; then
+    # Stand down for either reason: a newer stop claimed the baton, or a live
+    # away-mode daemon now owns the watcher and all triage.
+    if ! park_still_ours || ! current_session_still_ours \
+      || fm_afk_daemon_owns_supervision "$STATE"; then
       STAND_DOWN=1
       break
     fi
@@ -315,8 +322,8 @@ while [ "$attempt" -lt "$ARM_ATTEMPTS" ]; do
   wait "$ARM_PID" 2>/dev/null || true
   ARM_PID=
 
-  # Away mode may have been entered while parked: the daemon owns triage now.
-  [ -e "$STATE/.afk" ] && exit 0
+  # A live away daemon may have taken over while parked: it owns triage now.
+  fm_afk_daemon_owns_supervision "$STATE" && exit 0
 
   ACTIONABLE=0
   if [ -n "$ARM_OUT" ]; then

@@ -13,12 +13,35 @@ Cursor's `.cursor/hooks.json` `stop` hook (`bin/fm-turnend-guard-cursor.sh`) own
 Claude's `.claude/settings.json` Stop `asyncRewake` hook (`bin/fm-claude-stop-autoarm.sh`) owns routine tokenless re-arm.
 The hook fires on every Stop, and an eligible primary with supervision need admits one home-scoped owner that foregrounds `bin/fm-watch-arm.sh` inside the hook-owned process tree.
 A numeric session-lock owner that fails the shared `fm_harness_pid_alive` predicate is reclaimed through `bin/fm-lock.sh` before auto-arm state changes, while a live owner, absent lock, or malformed lock keeps the competing hook inert.
-The stale-owner claim occurs only after the existing AFK and supervision-need gates pass.
+The stale-owner claim occurs only after the existing away-mode and supervision-need gates pass.
 After each non-actionable arm close, the hook rechecks the identity-matched watcher lock and fresh beacon before retrying a bounded number of times.
 A cycle-end failure is benign when that live-watcher predicate is true, and the hook suppresses the arm output and continues silently.
 Only an exhausted failure with no verified watcher emits one last-resort notice for the continuous failure episode; later consecutive Stop cycles exit 2 to guarantee another Stop-owned retry without repeating the notice until the turn-end guard consumes the attended fail-open.
 The Claude turn-end guard owns the monotonic failure progression, one-time attended fail-open, post-alarm continuation suppression, and positive recovery reset described in [`turnend-guard.md`](turnend-guard.md#harness-integrations).
-While supervision is still needed and away mode remains inactive, an actionable close wakes the idle session through exit 2.
+While supervision is still needed and no live away-mode daemon owns this home, an actionable close wakes the idle session through exit 2.
+
+## Away-mode stand-down
+
+Away mode transfers watcher ownership to `bin/fm-supervise-daemon.sh`, so every native continuity mechanism stands down for it: the Claude Stop auto-arm, the Cursor stop-hook park, and the OpenCode plugin all stay inert rather than running a second supervision cycle against the daemon's.
+
+That stand-down is conditioned on the DAEMON, never on the `state/.afk` flag.
+The flag is a durable declaration that the captain stepped away; it is written before any daemon exists on the harness-native launch path, it survives a restart by design, and nothing removes it when the host kills the daemon.
+Standing down on the flag alone therefore produces the one state no home may reach: no supervision and no alarm at the same time, silently, for as long as the flag remains.
+
+`fm_afk_supervision_state` in [`../bin/fm-wake-lib.sh`](../bin/fm-wake-lib.sh) is the single owner of that distinction and the only vocabulary any caller uses:
+
+| state | meaning | effect |
+| --- | --- | --- |
+| `off` | no flag | normal harness supervision applies |
+| `daemon` | flag plus a live, identity-matched daemon holding `state/.supervise-daemon.lock` | native mechanisms stand down; exactly one supervision cycle, the daemon's |
+| `armed-no-daemon` | flag with no daemon behind it | native mechanisms stay armed AND name the broken away mode |
+
+Liveness is proven by the same recorded process identity the lock already carries, so a reused pid never passes as the daemon.
+`bin/fm-afk-launch.sh status` exposes the state to callers that cannot source bash, and takes no lock so a concurrent launch never delays the answer.
+
+In `armed-no-daemon`, supervision is restored by the ordinary mechanism and the failure is named where the session will see it: the Stop auto-arm's rewake and failure banners, the turn-end guard's block reason, the pull guard's banner, and the session-start digest and supervision block.
+No mechanism ever clears `state/.afk`: leaving away mode is the captain's decision, and a home that silently dropped it would start injecting per-wake instead of batching.
+A home in `armed-no-daemon` with nothing in flight raises nothing, because supervision need is unchanged by this contract - the alarm appears with the first real supervision need, and at the next session start.
 
 ## Actionable wake ordering
 
@@ -80,7 +103,10 @@ The same suite covers ordinary same-process session replacement for `/new`, `/re
 `tests/fm-watch-arm.test.sh` covers durable queue replay, real remote parent-replies ingestion into the authoritative status log, decision-only OPEN DECISIONS recovery, interrupted handling replay, generation-bound acknowledgement, a persistent live successor after recovery, a watcher close inside the handling window that must leave the printed acknowledgement valid, and the self-healing moved-generation acknowledgement that consumes its handled rows and names its remedy.
 `tests/fm-watcher-lock.test.sh` covers verified-successor attach, recovery publication before stale-lock removal, the typed self-eviction failure, bounded and successor-linked lifecycle rows, and a SIGSTOP counterfactual that distinguishes a live PID from a stale beacon before classifying termination.
 `tests/fm-subagent-pretool-check.test.sh` proves Claude retains only the non-status Bash seatbelts.
-`tests/fm-claude-stop-autoarm.test.sh` covers the auto-arm's scope, stale and live session owners, unchanged AFK and need boundaries, single-flight, bounded failure retries, benign live-watcher cycle ends, one-notice failure episodes, and exit-2 translation.
+`tests/fm-claude-stop-autoarm.test.sh` covers the auto-arm's scope, stale and live session owners, unchanged need boundaries, single-flight, bounded failure retries, benign live-watcher cycle ends, one-notice failure episodes, and exit-2 translation.
+It covers both away-mode states with the same flag on disk: a live daemon keeps the hook inert, while a flag with no daemon arms and names the broken away mode in its banner.
+`tests/fm-afk-launch.test.sh` covers the state vocabulary itself, including a live pid whose identity does not match, and proves a harness-native entry never reads as supervision before its daemon lands.
+`tests/fm-cursor-primary.test.sh`, `tests/fm-pi-watch-extension.test.sh`, and `tests/fm-session-start.test.sh` cover the same two states for the Cursor park, the OpenCode plugin, and the session-start digest.
 `FM_CLAUDE_LIVE_E2E=1 tests/fm-claude-stop-autoarm-live-e2e.test.sh` starts with the reproduced stale-lock state, runs session start first, completes two tokenless cycles, and checks the competing-live-owner negative control.
 `tests/fm-turnend-guard.test.sh` covers the cooperative `--claude` guard, including monotonic failed-epoch progression, the integrated bounded fail-open, post-alarm continuation suppression, and positive recovery reset.
 

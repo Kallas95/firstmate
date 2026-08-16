@@ -457,16 +457,31 @@ SH
   pass "cursor park: a superseded park cannot consume repair budget"
 }
 
-test_park_inert_when_afk() {
+test_park_inert_when_afk_daemon_is_alive() {
   local dir out
   dir=$(make_primary_dir "$TMP_ROOT/park-afk")
   : > "$dir/state/task1.meta"
-  : > "$dir/state/.afk"
+  fm_fake_afk_daemon "$dir/state" >/dev/null
   write_arm_fixture "$dir" actionable
   out=$(run_park "$dir")
-  [ -z "$out" ] || fail "away mode owns supervision; the park must not wake the primary: $out"
-  [ ! -e "$dir/state/arm-ran" ] || fail "the park armed while the away daemon owns the watcher"
-  pass "cursor park: inert while away mode is active"
+  [ -z "$out" ] || fail "a live away daemon owns supervision; the park must not wake the primary: $out"
+  [ ! -e "$dir/state/arm-ran" ] || fail "the park armed while a live away daemon owned the watcher"
+  pass "cursor park: inert while a live away daemon owns supervision"
+}
+
+# The away-mode flag alone used to stand this park down. A flag with no daemon
+# behind it supervises nothing, so the park must remain the home's only cover.
+test_park_active_when_afk_flag_has_no_daemon() {
+  local dir out
+  dir=$(make_primary_dir "$TMP_ROOT/park-afk-no-daemon")
+  : > "$dir/state/task1.meta"
+  fm_fake_afk_flagged_no_daemon "$dir/state"
+  write_arm_fixture "$dir" actionable
+  out=$(run_park "$dir")
+  [ -e "$dir/state/arm-ran" ] || fail "the park stayed inert with away mode flagged and no daemon running"
+  assert_contains "$out" "followup_message" "the park must still deliver its wake as a follow-up"
+  assert_present "$dir/state/.afk" "the park must never clear the captain's away-mode flag"
+  pass "cursor park: stays the home's cover when away mode is flagged with no daemon"
 }
 
 test_park_stands_down_when_away_mode_activates_before_commit() {
@@ -492,7 +507,7 @@ SH
     waited=$((waited + 1))
     [ "$waited" -lt 200 ] || fail "the park never reached follow-up preparation"
   done
-  : > "$dir/state/.afk"
+  fm_fake_afk_daemon "$dir/state" >/dev/null
   : > "$dir/state/afk-commit-release"
   wait "$park_pid" 2>/dev/null || true
   out=$(cat "$dir/state/afk-transition-out" 2>/dev/null || true)
@@ -652,7 +667,8 @@ test_park_loop_ceiling_warns_once_then_goes_quiet
 test_park_stands_down_when_superseded
 test_park_serializes_supersession_with_followup_commit
 test_superseded_park_does_not_consume_nag_budget
-test_park_inert_when_afk
+test_park_inert_when_afk_daemon_is_alive
+test_park_active_when_afk_flag_has_no_daemon
 test_park_stands_down_when_away_mode_activates_before_commit
 test_park_inert_without_session_lock
 test_park_stands_down_after_session_takeover
