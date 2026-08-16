@@ -57,11 +57,24 @@ const DENIED_COMMANDS = new Map([
 // ordinary way a worker loads a secrets file, so they belong here: `. .env` and
 // `source .env` expose exactly what `cat .env` exposes. A sourced path whose
 // basename is not `.env` is untouched, so `. ./scripts/env.sh` stays ordinary.
+// `cmp` is deliberately absent: it prints the offset of the first differing
+// byte, not the contents.
 const READING_COMMANDS = new Set([
-  "cat", "less", "more", "tail", "head", "strings", "od", "xxd", "base64",
-  "nl", "tac", "bat", "sed", "awk", "grep", "egrep", "fgrep", "rg", "cut", "sort",
-  "source", ".",
+  "cat", "less", "more", "tail", "head", "strings", "od", "xxd", "hexdump",
+  "base64", "nl", "tac", "bat", "diff", "sed", "awk", "grep", "egrep", "fgrep",
+  "rg", "cut", "sort", "source", ".",
 ]);
+
+// The reading commands whose FIRST positional operand is a pattern or a script
+// rather than a path. `grep .env` searches for that text and opens no file of
+// that name, so refusing it would block work this guard has no opinion about.
+const PATTERN_READING_COMMANDS = new Set(["grep", "egrep", "fgrep", "rg", "sed", "awk"]);
+
+// The options of that family which carry the pattern themselves - so no
+// positional operand does - and, for the -f/--file spellings, NAME a file the
+// command reads its patterns from, which is a path like any other.
+const PATTERN_LONG_OPTION = /^--(regexp|expression|source|file)(?:=(.*))?$/;
+const PATTERN_SHORT_OPTION = /^-[A-Za-z]*?([ef])(.*)$/;
 
 // Commands that copy or relocate a file. Denied when a .env is a SOURCE.
 // `tee` is deliberately absent: it has no source operand, it reads stdin and
@@ -152,6 +165,33 @@ function copySourceOperands(args) {
     operands.push(value);
   }
   return destinationIsTrailing ? operands.slice(0, -1) : operands;
+}
+
+// The operands a reading command actually opens. Only the one positional
+// operand that carries the pattern is dropped, and only when no option supplied
+// the pattern instead: every operand after it is a search target, and a file an
+// option names is a path, so `grep -f .env .`, `grep --file=.env .` and
+// `grep TODO .env` all stay inside the perimeter.
+function readTargets(name, args) {
+  if (!PATTERN_READING_COMMANDS.has(name)) return args;
+  const paths = [];
+  let patternIsPositional = true;
+  for (let index = 0; index < args.length; index += 1) {
+    const value = args[index];
+    if (!isOption(value)) {
+      paths.push(value);
+      continue;
+    }
+    const long = PATTERN_LONG_OPTION.exec(value);
+    const short = long ? null : (value.startsWith("--") ? null : PATTERN_SHORT_OPTION.exec(value));
+    if (!long && !short) continue;
+    patternIsPositional = false;
+    const attached = long ? long[2] : short[2];
+    const carried = attached === undefined || attached === "" ? args[index += 1] : attached;
+    const namesFile = long ? long[1] === "file" : short[1] === "f";
+    if (namesFile && carried !== undefined) paths.push(carried);
+  }
+  return patternIsPositional ? paths.slice(1) : paths;
 }
 
 // A harness file tool that only writes at the path it names exposes no secret,
@@ -368,7 +408,7 @@ function classifyNode(node, depth) {
   if (denied) return deny(denied);
 
   const args = position.words.slice(position.index + 1).map((word) => word.value);
-  if (READING_COMMANDS.has(name) && args.some(isDotenvPath)) return deny("dotenv-access");
+  if (READING_COMMANDS.has(name) && readTargets(name, args).some(isDotenvPath)) return deny("dotenv-access");
   if (COPYING_COMMANDS.has(name) && copySourceOperands(args).some(isDotenvPath)) {
     return deny("dotenv-access");
   }

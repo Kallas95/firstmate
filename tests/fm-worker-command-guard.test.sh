@@ -106,6 +106,18 @@ matrix_case D52 deny remote-transfer 'find . -okdir ssh host uptime \;'
 matrix_case D53 deny permission-change 'echo x | xargs chmod +x'
 matrix_case D54 deny remote-transfer 'xargs -0 -n1 ssh'
 matrix_case D55 deny permission-change 'git ls-files | xargs -I {} chmod 755 {}'
+# Commands that print a file's contents, whatever they are called.
+matrix_case D56 deny dotenv-access 'diff .env .env.example'
+matrix_case D57 deny dotenv-access 'hexdump -C .env'
+# A search names the secrets file: as the file its patterns are read FROM, in
+# both option spellings, or as a search target after the pattern.
+matrix_case D58 deny dotenv-access 'grep -f .env src/'
+matrix_case D59 deny dotenv-access 'grep --file=.env src/'
+matrix_case D60 deny dotenv-access 'grep -rf .env src/'
+matrix_case D61 deny dotenv-access 'grep TODO .env'
+matrix_case D62 deny dotenv-access 'rg --file .env src/'
+matrix_case D63 deny dotenv-access 'sed -n 1p .env'
+matrix_case D64 deny dotenv-access 'awk "{print}" .env'
 
 # ALLOW: ordinary worker work, including the push form the delivery path needs.
 matrix_case A01 allow - 'git push origin HEAD'
@@ -148,6 +160,19 @@ matrix_case A28 allow - 'source scripts/setup.sh'
 matrix_case A29 allow - 'find . -name "*.md" -exec wc -l {} +'
 matrix_case A30 allow - 'git ls-files | xargs wc -l'
 matrix_case A31 allow - 'eval "npm test"'
+# Searching FOR the secrets filename opens no file of that name. The pattern is
+# the first positional operand by the command's own grammar, so only it is
+# dropped.
+matrix_case A32 allow - 'ls | grep .env'
+matrix_case A33 allow - 'grep -c ".env"'
+matrix_case A34 allow - 'grep -rn "\.env" .'
+matrix_case A35 allow - 'rg "\.env" --files-with-matches'
+matrix_case A36 allow - 'git ls-files | grep -F .env'
+matrix_case A37 allow - 'sed -n "/\.env/p" README.md'
+# A comparison that names no secrets file, and the version-control diff
+# subcommand, which keeps going through the git branch.
+matrix_case A38 allow - 'diff config/x-mode.env config/x-mode.env.example'
+matrix_case A39 allow - 'git diff --stat'
 
 MATRIX_TMP=$(mktemp -d "${TMPDIR:-/tmp}/fm-worker-guard-matrix.XXXXXX")
 FM_TEST_CLEANUP_DIRS+=("$MATRIX_TMP")
