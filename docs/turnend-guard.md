@@ -47,6 +47,7 @@ Away mode never exempts a turn end from this predicate, and it changes only WHO 
 The guard resolves that with `fm_afk_supervision_state` and renders the matching repair line: `daemon` keeps the unchanged "away mode owns the watcher" guidance, while `armed-no-daemon` states that the flag has no daemon behind it and then gives the harness's ordinary repair instruction unchanged, prefixes included.
 That diagnosis never replaces the instruction, because codex and grok have no automatic re-arm and the instruction is what restores their supervision.
 The attended fail-open is refused only for a live `daemon`, because a flagged-but-dead away mode is the ordinary no-supervision case and must keep the ordinary bounded progression instead of blocking against an ownership that does not exist.
+When it does fire under `armed-no-daemon`, its alarm names the broken away mode and asks for a daemon restart or an away-mode exit instead of asking for an attended session, because the flag itself says the captain left.
 [`watcher-continuity.md`](watcher-continuity.md#away-mode-stand-down) owns that state vocabulary and why liveness, not the flag, is the condition.
 
 `FM_STATE_OVERRIDE` wins over `FM_HOME/state`, and `FM_HOME` wins over repository-root `state/`.
