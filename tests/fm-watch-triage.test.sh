@@ -2252,6 +2252,92 @@ test_decision_held_marker_does_not_outlive_its_absorb() {
   pass "a decision-held marker never outlives its absorb to swallow a re-classified pane"
 }
 
+# --- a busy blink behind a frozen screen must not undo the absorb -----------
+# A crew parked on a decision is idle for hours, so it crosses BUSY_TURN_MAX_SECS
+# by construction; one poll where the semantic busy contract reports busy while
+# the pane renders exactly the same screen then routes through the wedge timer.
+# The pane never leaves that hash, so there is no later first-sight to re-decide
+# anything: whatever this poll leaves behind is permanent. Dropping the absorb
+# marker here would hand the parked crew straight back to the 240s cycle this
+# whole path exists to remove.
+test_decision_held_absorb_survives_a_busy_blip_at_the_same_hash() {
+  local dir state fakebin out capture_file window key pane_hash sig pid
+  dir=$(make_case decision-held-busy-blip); state="$dir/state"; fakebin="$dir/fakebin"
+  out="$dir/watch.out"; capture_file="$dir/pane.txt"
+  window="test:fm-blip"
+  printf 'waiting on the captain\n' > "$capture_file"
+  printf 'window=%s\nkind=ship\nharness=pi\n' "$window" > "$state/blip.meta"
+  printf 'needs-decision [key=api-shape]: pick A or B\n' > "$state/blip.status"
+  sig=$(seen_sig "$state/blip.status"); printf '%s' "$sig" > "$state/.seen-blip_status"
+  key=$(printf '%s' "$window" | tr ':/.' '___')
+  pane_hash=$(hash_text "waiting on the captain")
+  printf '%s' "$pane_hash" > "$state/.hash-$key"
+  printf '1\n' > "$state/.count-$key"
+  record_pi_state "$state" blip idle
+  export FM_FAKE_CREW_STATE='state: working · source: run-step · validating (running)'
+
+  # Phase A: absorbed as decision-held, wedge timer disarmed.
+  PATH="$fakebin:$PATH" FM_FAKE_TMUX_WINDOW="$window" FM_FAKE_TMUX_CAPTURE="$capture_file" \
+    FM_STATE_OVERRIDE="$state" FM_CREW_STATE_BIN="$fakebin/fm-crew-state.sh" \
+    FM_STALE_ESCALATE_SECS=999 FM_PAUSE_RESURFACE_SECS=999 FM_POLL=1 FM_SIGNAL_GRACE=1 \
+    FM_CHECK_INTERVAL=999999 FM_HEARTBEAT=999999 "$WATCH" > "$out" &
+  pid=$!
+  if ! wait_live "$pid" 30; then
+    reap "$pid"; fail "the parked crew was not absorbed as decision-held: $(cat "$out")"
+  fi
+  [ -e "$state/.decision-held-$key" ] || { reap "$pid"; fail "no decision-held absorb to blip"; }
+  [ ! -e "$state/.stale-since-$key" ] || { reap "$pid"; fail "the decision-held absorb left a wedge timer armed"; }
+  reap "$pid"
+  ack_stopped_cycle "$state" || fail "could not acknowledge the busy-blip phase-A stop"
+
+  # Phase B: the blink. Same screen, same hash - only the backend's verdict flips,
+  # and the parked crew is long past its completed-turn bound, so this poll takes
+  # the wedge-timer sub-branch of the same-hash reset and arms .stale-since-.
+  record_pi_state "$state" blip busy
+  touch -t 200001010000 "$state/blip.meta"
+  : > "$out"
+  PATH="$fakebin:$PATH" FM_FAKE_TMUX_WINDOW="$window" FM_FAKE_TMUX_CAPTURE="$capture_file" \
+    FM_STATE_OVERRIDE="$state" FM_CREW_STATE_BIN="$fakebin/fm-crew-state.sh" \
+    FM_BUSY_TURN_MAX_SECS=1 FM_STALE_ESCALATE_SECS=999 FM_PAUSE_RESURFACE_SECS=999 \
+    FM_POLL=1 FM_SIGNAL_GRACE=1 FM_CHECK_INTERVAL=999999 FM_HEARTBEAT=999999 "$WATCH" > "$out" &
+  pid=$!
+  if ! wait_live "$pid" 40; then
+    reap "$pid"; fail "the busy blink surfaced instead of resetting bookkeeping: $(cat "$out")"
+  fi
+  [ -s "$state/.stale-since-$key" ] \
+    || { reap "$pid"; fail "the busy blink did not take the wedge-timer reset sub-branch under test"; }
+  [ "$(cat "$state/.stale-$key" 2>/dev/null || true)" = "$pane_hash" ] \
+    || { reap "$pid"; fail "the busy blink moved the stale suppressor off the absorbed hash"; }
+  reap "$pid"
+  ack_stopped_cycle "$state" || fail "could not acknowledge the busy-blip phase-B stop"
+
+  # Phase C: idle again on the same frozen screen, with the timer the blink armed
+  # backdated well past a live 240s threshold. The parked crew must return to the
+  # long cadence and disarm that timer - not escalate as a possible wedge.
+  record_pi_state "$state" blip idle
+  echo $(( $(date +%s) - 500 )) > "$state/.stale-since-$key"
+  sig=$(seen_sig "$state/blip.status"); printf '%s' "$sig" > "$state/.seen-blip_status"
+  : > "$out"
+  PATH="$fakebin:$PATH" FM_FAKE_TMUX_WINDOW="$window" FM_FAKE_TMUX_CAPTURE="$capture_file" \
+    FM_STATE_OVERRIDE="$state" FM_CREW_STATE_BIN="$fakebin/fm-crew-state.sh" \
+    FM_BUSY_TURN_MAX_SECS=1 FM_STALE_ESCALATE_SECS=240 FM_PAUSE_RESURFACE_SECS=999 \
+    FM_POLL=1 FM_SIGNAL_GRACE=1 FM_CHECK_INTERVAL=999999 FM_HEARTBEAT=999999 "$WATCH" > "$out" &
+  pid=$!
+  if ! wait_live "$pid" 40; then
+    reap "$pid"
+    fail "a busy blink dropped the parked crew back onto the 240s wedge cycle: $(cat "$out")"
+  fi
+  grep -F "possible wedge" "$out" >/dev/null \
+    && { reap "$pid"; fail "the parked crew wedge-escalated after a busy blink"; }
+  [ -e "$state/.decision-held-$key" ] \
+    || { reap "$pid"; fail "the busy blink dropped the absorb marker for a hash the pane never left"; }
+  [ ! -e "$state/.stale-since-$key" ] \
+    || { reap "$pid"; fail "the resumed absorb did not disarm the timer the blink armed"; }
+  reap "$pid"
+  unset FM_FAKE_CREW_STATE
+  pass "a busy blink behind a frozen screen never drops a parked crew back onto the wedge cycle"
+}
+
 # --- the decision closes: normal wedge cadence resumes immediately ----------
 # A crew that stays mute AFTER the captain's answer is a real wedge and must
 # re-escalate. Once the decision fold closes (a resolved line lands),
@@ -2388,6 +2474,7 @@ test_exited_declared_pause_is_bounded_but_live_gate_surfaces
 test_open_decision_stale_absorbed_on_long_cadence_not_wedged
 test_open_decision_not_working_surfaces_immediately
 test_decision_held_marker_does_not_outlive_its_absorb
+test_decision_held_absorb_survives_a_busy_blip_at_the_same_hash
 test_open_decision_closure_resumes_normal_cadence
 test_closed_decision_stale_wedge_escalates_like_today
 test_secondmate_paused_resurfaces_in_normal_mode

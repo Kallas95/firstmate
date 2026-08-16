@@ -1300,16 +1300,19 @@ EOF
       else
         # Pane busy or not yet stably stale: reset pending escalation bookkeeping,
         # unless a genuinely busy pane has gone too long with no completed turn -
-        # then route it through the same wedge timer instead of erasing it. The
-        # decision-held marker names a stale hash this pane is no longer sitting
-        # on, so it dies here whichever sub-branch runs; leaving it to the wedge
-        # sub-branch alone once let it outlive its absorb and re-route the pane.
-        # .decision-resurfaced-* is NOT reset - it is the long-cadence throttle,
-        # and wiping it on a pane that keeps churning or blinking busy would let
-        # the absorb re-surface far more often than once per PAUSE_RESURFACE_SECS.
-        # Its owner is the decision's closure (clear_decision_held_tracking),
-        # exactly as .paused-resurfaced-* is owned by clear_pause_state.
-        rm -f "$STATE/.decision-held-$key"
+        # then route it through the same wedge timer instead of erasing it.
+        # Neither decision-held marker is reset here: this arm is the UNCHANGED
+        # hash, so the pane still sits on exactly the hash the absorb marker
+        # names, and .stale-<key> still names it too - dropping the marker would
+        # strand the pane on the wedge timer with no first-sight left to ever
+        # route it back, so one blink of a semantic busy verdict behind a frozen
+        # screen would undo the absorb for good. Keeping it makes that blink
+        # self-repairing: the next idle poll matches the marker again and the
+        # resumed absorb disarms the timer this reset armed. The throttle stays
+        # for the same reason it survives a churning pane - one re-surface per
+        # PAUSE_RESURFACE_SECS, owned by the decision's closure
+        # (clear_decision_held_tracking), exactly as .paused-resurfaced-* is
+        # owned by clear_pause_state.
         if [ "$busy_now" -eq 0 ] && busy_turn_over_age "$task"; then
           wedge_timer_check "$w" "$ssf" "busy (no completed turn)" "$ewf"
         else
@@ -1322,6 +1325,9 @@ EOF
     else
       printf '%s' "$h" > "$hf"
       echo 0 > "$cf"
+      # The hash CHANGED, so the decision-held marker names a stale hash this
+      # pane has moved off: it dies here whichever sub-branch runs, and the next
+      # stable poll is a first-sight that re-reads crew state from scratch.
       rm -f "$STATE/.decision-held-$key"
       if [ "$busy_now" -eq 0 ] && busy_turn_over_age "$task"; then
         wedge_timer_check "$w" "$ssf" "busy (no completed turn)" "$ewf"
