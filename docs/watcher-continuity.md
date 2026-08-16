@@ -40,8 +40,10 @@ Standing down on the flag alone therefore produces the one state no home may rea
 Liveness is proven by the same recorded process identity the lock already carries, so a reused pid never passes as the daemon.
 `bin/fm-afk-launch.sh status` exposes the state to callers that cannot source bash, and takes no lock so a concurrent launch never delays the answer.
 `bin/fm-afk-launch.sh down-notice <cover>` exposes the alarm sentence itself the same way, so the JavaScript plugin and the TypeScript extension print the one wording `fm_afk_daemon_down_notice` owns rather than each keeping a copy that drifts.
-`<cover>` names the mechanism supervising in place of the dead daemon, the only part that differs per harness.
-A banner that has just reported its own mechanism broken passes no cover at all, and the sentence then says nothing is covering the home: an alarm that claims a supervisor in the same breath as its failure is the same "supervision that does not exist" this contract exists to stop.
+`<cover>` names the mechanism supervising in place of the dead daemon, the only part that differs per harness - and per call, not per adapter.
+A banner that has just reported its own mechanism broken passes an EMPTY cover, and the sentence then says nothing is covering the home: an alarm that claims a supervisor in the same breath as its failure is the same "supervision that does not exist" this contract exists to stop.
+That empty cover still produces the whole sentence, never a blank answer and never a truncated one, because a message that merely omits the claim would read as a cover to anyone skimming it.
+Omitting the argument altogether stays a caller error and exits 2, so a caller that forgot the clause is caught rather than silently promoted to "nothing covers this home".
 
 In `armed-no-daemon`, supervision is restored by the ordinary mechanism - the whole ordinary mechanism, including the watcher's own triage.
 A re-armed watcher that still one-shot every benign signal, every distinct stale hash, and every heartbeat would hand them to a daemon that is not there to absorb them, and each handoff costs a model turn; the ordinary triage absorbs them exactly as it does outside away mode.

@@ -142,7 +142,7 @@ EOF
 # away mode would otherwise wait for the next session start. A live daemon leaves
 # the wake exactly as it was.
 pi_wake_notice_case() {  # <name> <away-state live|dead> <expect-notice 0|1>
-  local name=$1 away=$2 expect_notice=$3 repo home plugin out status
+  local name=$1 away=$2 arm=$3 repo home plugin out status
   repo="$TMP_ROOT/pi-notice-$name-root"
   home="$TMP_ROOT/pi-notice-$name-home"
   mkdir -p "$repo/bin" "$home/state" "$home/config"
@@ -154,12 +154,29 @@ pi_wake_notice_case() {  # <name> <away-state live|dead> <expect-notice 0|1>
   else
     fm_fake_afk_flagged_no_daemon "$home/state"
   fi
-  cat > "$repo/bin/fm-watch-arm.sh" <<'SH'
+  if [ "$arm" = actionable ]; then
+    # First cycle wakes; its successor comes up ready, so the extension really is
+    # covering the home when it delivers that wake.
+    cat > "$repo/bin/fm-watch-arm.sh" <<'SH'
+#!/usr/bin/env bash
+printf 'arm\n' >> "${FM_ARM_LOG:?}"
+if [ "$(wc -l < "$FM_ARM_LOG" | tr -d '[:space:]')" -eq 1 ]; then
+  printf 'watcher: started pid=%s (beacon fresh)\n' "$$"
+  printf 'signal: away-notice wake\n'
+  exit 0
+fi
+printf 'watcher: started pid=%s (beacon fresh)\n' "$$"
+trap 'exit 0' TERM INT
+while [ ! -e "${FM_STOP_FILE:?}" ]; do sleep 0.02; done
+SH
+  else
+    cat > "$repo/bin/fm-watch-arm.sh" <<'SH'
 #!/usr/bin/env bash
 printf 'watcher: healthy pid=1 (beacon 0s)\n'
 SH
+  fi
   chmod +x "$repo/bin/fm-watch-arm.sh"
-  out=$(PLUGIN="$plugin" FM_HOME="$home" FM_ROOT_OVERRIDE="$repo" FM_WATCH_REARM_RETRY_BASE_MS=5 FM_WATCH_REARM_RETRY_MAX_MS=10 FM_WATCH_REARM_RETRY_LIMIT=2 node --input-type=module 2>&1 <<'EOF'
+  out=$(PLUGIN="$plugin" FM_HOME="$home" FM_ROOT_OVERRIDE="$repo" FM_ARM_LOG="$TMP_ROOT/pi-notice-$name.log" FM_STOP_FILE="$TMP_ROOT/pi-notice-$name.stop" FM_PI_ARM_READY_TIMEOUT_MS=2000 FM_WATCH_REARM_RETRY_BASE_MS=5 FM_WATCH_REARM_RETRY_MAX_MS=10 FM_WATCH_REARM_RETRY_LIMIT=2 node --input-type=module 2>&1 <<'EOF'
 import { writeFileSync } from "node:fs";
 import { pathToFileURL } from "node:url";
 
@@ -186,31 +203,44 @@ await handler("", { ui: { notify() {} } });
 for (let i = 0; i < 500 && !prompt; i += 1) {
   await new Promise((resolve) => setTimeout(resolve, 20));
 }
+writeFileSync(process.env.FM_STOP_FILE, "stop\n");
 if (!prompt.includes("FIRSTMATE WATCHER WAKE")) {
   console.error(`missing follow-up prompt: ${prompt}`);
   process.exit(1);
 }
 console.log(JSON.stringify(prompt));
+process.exit(0);
 EOF
 )
   status=$?
   expect_code 0 "$status" "Pi away-notice case '$name' failed to run: $out"
-  if [ "$expect_notice" -eq 1 ]; then
-    assert_contains "$out" "AWAY MODE IS FLAGGED BUT ITS DAEMON IS NOT RUNNING" \
-      "the Pi wake did not name the away mode that stopped supervising"
-    assert_contains "$out" "this extension-owned watcher cycle" \
-      "the Pi wake did not name the extension as the cover that took over"
-  else
+  if [ "$away" = live ]; then
     assert_not_contains "$out" "AWAY MODE IS FLAGGED" \
       "a live away daemon made the Pi wake claim away mode was broken"
+  else
+    assert_contains "$out" "AWAY MODE IS FLAGGED BUT ITS DAEMON IS NOT RUNNING" \
+      "the Pi wake did not name the away mode that stopped supervising"
+    if [ "$arm" = actionable ]; then
+      assert_contains "$out" "this extension-owned watcher cycle is the only cover" \
+        "the delivered wake did not name the extension as the cover that took over"
+    else
+      # The same message just reported this cycle broken, so it must state the
+      # absence of any cover - not merely omit the claim, which a truncated
+      # sentence would also do.
+      assert_contains "$out" "nothing is covering this home" \
+        "the Pi failure wake did not state that nothing covers the home"
+      assert_not_contains "$out" "is the only cover" \
+        "the Pi failure wake claimed a cover in the same breath as its own failure"
+    fi
   fi
   assert_present "$home/state/.afk" "the extension must never clear the captain's away-mode flag"
 }
 
 test_pi_wake_names_a_broken_away_mode() {
-  pi_wake_notice_case live live 0
-  pi_wake_notice_case dead dead 1
-  pass "Pi watcher wake names an away mode flagged with no daemon, and stays quiet under a live one"
+  pi_wake_notice_case live live failure
+  pi_wake_notice_case dead-failure dead failure
+  pi_wake_notice_case dead-actionable dead actionable
+  pass "Pi watcher wake names an away mode flagged with no daemon, and claims a cover only when one exists"
 }
 
 test_pi_tool_returns_agent_tool_result() {
@@ -1371,8 +1401,8 @@ test_opencode_plugin_stands_down_only_for_a_live_away_daemon() {
 # broken away mode on this path: fm-guard.sh and the turn-end guard both stay
 # quiet for a healthy watcher, so the wake this plugin delivers is the only
 # surface between the daemon's death and the next session start.
-opencode_wake_notice_case() {  # <name> <away-state off|dead> <expect-notice 0|1>
-  local name=$1 away=$2 expect_notice=$3 plugin repo home log out status
+opencode_wake_notice_case() {  # <name> <away-state off|dead> <arm failure|actionable>
+  local name=$1 away=$2 arm=$3 plugin repo home log out status
   plugin="$ROOT/.opencode/plugins/fm-primary-watch-arm.js"
   repo="$TMP_ROOT/opencode-notice-$name-root"
   home="$TMP_ROOT/opencode-notice-$name-home"
@@ -1383,13 +1413,31 @@ opencode_wake_notice_case() {  # <name> <away-state off|dead> <expect-notice 0|1
   : > "$home/state/task.meta"
   [ "$away" = off ] || fm_fake_afk_flagged_no_daemon "$home/state"
   install_real_afk_launcher_shim "$repo"
-  cat > "$repo/bin/fm-watch-arm.sh" <<'SH'
+  if [ "$arm" = actionable ]; then
+    # First cycle wakes; its successor comes up ready, so the plugin really is
+    # covering the home when it delivers that wake.
+    cat > "$repo/bin/fm-watch-arm.sh" <<'SH'
+#!/usr/bin/env bash
+printf 'arm=%s\n' "$$" >> "${FM_ARM_LOG:?}"
+if [ "$(wc -l < "$FM_ARM_LOG" | tr -d '[:space:]')" -eq 1 ]; then
+  printf 'watcher: started pid=%s (beacon fresh)\n' "$$"
+  printf 'signal: away-notice wake\n'
+  exit 0
+fi
+printf 'watcher: started pid=%s (beacon fresh)\n' "$$"
+trap 'exit 0' TERM INT
+while [ ! -e "${FM_STOP_FILE:?}" ]; do sleep 0.02; done
+SH
+  else
+    cat > "$repo/bin/fm-watch-arm.sh" <<'SH'
 #!/usr/bin/env bash
 printf 'arm=%s\n' "$$" >> "${FM_ARM_LOG:?}"
 printf 'watcher: healthy pid=1 (beacon 0s)\n'
 SH
+  fi
   chmod +x "$repo/bin/fm-watch-arm.sh"
   out=$(PLUGIN="$plugin" WORKTREE="$repo" FM_HOME="$home" FM_ARM_LOG="$log" \
+    FM_STOP_FILE="$TMP_ROOT/opencode-notice-$name.stop" \
     FM_WATCH_REARM_RETRY_BASE_MS=5 FM_WATCH_REARM_RETRY_MAX_MS=10 FM_WATCH_REARM_RETRY_LIMIT=2 node 2>&1 <<'EOF'
 import { writeFileSync } from "node:fs";
 import { pathToFileURL } from "node:url";
@@ -1413,32 +1461,45 @@ await hooks.event({ event: { type: "session.idle", properties: { sessionID: "ses
 for (let i = 0; i < 500 && !prompts.some((message) => message.includes("WATCHER FIRED")); i += 1) {
   await new Promise((resolve) => setTimeout(resolve, 10));
 }
+writeFileSync(process.env.FM_STOP_FILE, "stop\n");
 const wake = prompts.find((message) => message.includes("WATCHER FIRED"));
 if (!wake) {
   console.error(`no wake was delivered: ${prompts.join(" | ")}`);
   process.exit(1);
 }
 console.log(JSON.stringify(wake));
+process.exit(0);
 EOF
 )
   status=$?
   expect_code 0 "$status" "OpenCode away-notice case '$name' failed to run: $out"
-  if [ "$expect_notice" -eq 1 ]; then
-    assert_contains "$out" "AWAY MODE IS FLAGGED BUT ITS DAEMON IS NOT RUNNING" \
-      "the OpenCode wake did not name the away mode that stopped supervising"
-    assert_contains "$out" "this plugin-owned watcher cycle" \
-      "the OpenCode wake did not name the plugin as the cover that took over"
-    assert_present "$home/state/.afk" "the plugin must never clear the captain's away-mode flag"
-  else
+  if [ "$away" = off ]; then
     assert_not_contains "$out" "AWAY MODE IS FLAGGED" \
       "a home with no away mode was told its away mode is broken"
+  else
+    assert_contains "$out" "AWAY MODE IS FLAGGED BUT ITS DAEMON IS NOT RUNNING" \
+      "the OpenCode wake did not name the away mode that stopped supervising"
+    if [ "$arm" = actionable ]; then
+      assert_contains "$out" "this plugin-owned watcher cycle is the only cover" \
+        "the delivered wake did not name the plugin as the cover that took over"
+    else
+      # The same message just reported this cycle broken, so it must state the
+      # absence of any cover - not merely omit the claim, which a truncated
+      # sentence would also do.
+      assert_contains "$out" "nothing is covering this home" \
+        "the OpenCode failure wake did not state that nothing covers the home"
+      assert_not_contains "$out" "is the only cover" \
+        "the OpenCode failure wake claimed a cover in the same breath as its own failure"
+    fi
+    assert_present "$home/state/.afk" "the plugin must never clear the captain's away-mode flag"
   fi
 }
 
 test_opencode_wake_names_a_broken_away_mode() {
-  opencode_wake_notice_case no-away off 0
-  opencode_wake_notice_case dead-daemon dead 1
-  pass "OpenCode watcher wake names an away mode flagged with no daemon, and stays quiet otherwise"
+  opencode_wake_notice_case no-away off failure
+  opencode_wake_notice_case dead-failure dead failure
+  opencode_wake_notice_case dead-actionable dead actionable
+  pass "OpenCode watcher wake names an away mode flagged with no daemon, and claims a cover only when one exists"
 }
 
 test_opencode_primary_watch_plugin_uses_effective_state_home() {

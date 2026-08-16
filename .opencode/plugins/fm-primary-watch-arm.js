@@ -126,9 +126,12 @@ async function afkDaemonOwnsSupervision(paths) {
 // bin/fm-wake-lib.sh, reached here through the same read-only launcher entry
 // point the state query uses; the flag test short-circuits the spawn outside
 // away mode, and an unreadable answer stays silent rather than inventing one.
-async function awayModeDownNotice(paths) {
+// The cover is per-call, not per-adapter: a path that just reported this cycle
+// broken passes an empty one, so the sentence says nothing covers the home
+// instead of naming the mechanism it has just declared dead.
+async function awayModeDownNotice(paths, cover) {
   if (!existsSync(`${paths.state}/.afk`)) return "";
-  const result = await runProcess("bash", [`${paths.root}/bin/fm-afk-launch.sh`, "down-notice", "this plugin-owned watcher cycle"], {
+  const result = await runProcess("bash", [`${paths.root}/bin/fm-afk-launch.sh`, "down-notice", cover], {
     env: { ...process.env, FM_HOME: paths.home, FM_STATE_OVERRIDE: paths.state },
   });
   if (result.code !== 0) return "";
@@ -245,7 +248,7 @@ function wakePrompt(reason, notice = "") {
 }
 
 function surfaceFailure(paths, client, sessionID, reason) {
-  void awayModeDownNotice(paths)
+  void awayModeDownNotice(paths, "")
     .then((notice) => sendPrompt(paths, client, sessionID, wakePrompt(reason, notice)))
     .catch(() => {
     });
@@ -400,7 +403,7 @@ function spawnArm(paths, sessionID, client, predecessorArmPid = "") {
       void restoration.then(async (result) => {
         if (restorationInFlight === restoration) restorationInFlight = null;
         const message = result.failure ? `${classification.message}\n\n${result.failure}` : classification.message;
-        const notice = await awayModeDownNotice(paths);
+        const notice = await awayModeDownNotice(paths, result.failure ? "" : "this plugin-owned watcher cycle");
         return sendPrompt(paths, client, sessionID, wakePrompt(message, notice), result.recovery);
       }).catch(() => {
       });

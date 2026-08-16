@@ -587,12 +587,28 @@ unit_down_notice_speaks_only_for_a_flagged_dead_daemon() {
     fail "down-notice: removed the away-mode flag"
   fi
 
+  # An EMPTY cover is the deliberate "nothing covers this home" case a failure
+  # path must be able to state. It must produce the WHOLE sentence naming that
+  # absence, never a blank answer and never a clause that reads as a cover.
+  out=$(FM_HOME="$st" FM_STATE_OVERRIDE="$st/state" "$LAUNCH" down-notice '' 2>/dev/null)
+  status=$?
+  if [ "$status" -eq 0 ] \
+    && printf '%s\n' "$out" | grep -F 'AWAY MODE IS FLAGGED BUT ITS DAEMON IS NOT RUNNING' >/dev/null \
+    && printf '%s\n' "$out" | grep -F 'nothing is covering this home' >/dev/null \
+    && ! printf '%s\n' "$out" | grep -F 'is the only cover' >/dev/null; then
+    pass "down-notice: an empty cover names the absence of any cover, in full"
+  else
+    fail "down-notice: an empty cover exited $status with: $out"
+  fi
+
+  # An ABSENT argument stays a caller error: that guard is what catches a caller
+  # who forgot the clause entirely rather than choosing to state its absence.
   FM_HOME="$st" FM_STATE_OVERRIDE="$st/state" "$LAUNCH" down-notice >/dev/null 2>&1
   status=$?
   if [ "$status" -eq 2 ]; then
-    pass "down-notice: a missing cover fails loudly instead of emitting a half-sentence"
+    pass "down-notice: an omitted cover argument fails loudly instead of emitting a half-sentence"
   else
-    fail "down-notice: a missing cover exited $status"
+    fail "down-notice: an omitted cover argument exited $status"
   fi
   rm -rf "$st"
 }
@@ -634,7 +650,7 @@ unit_help_documents_every_subcommand_untruncated() {
   done
   # The last sentence of the last documented subcommand, and the trailing
   # paragraphs after it: the truncation cut exactly here.
-  printf '%s\n' "$out" | grep -F "the four adapters never drift apart." >/dev/null \
+  printf '%s\n' "$out" | grep -F "adapters never drift apart." >/dev/null \
     || fail "help: the last subcommand entry is truncated mid-sentence"
   printf '%s\n' "$out" | grep -F "Supported backends:" >/dev/null \
     || fail "help: the supported-backend paragraph was cut off"
