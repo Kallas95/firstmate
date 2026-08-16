@@ -1,0 +1,147 @@
+
+================================================================
+1. bin/fm-afk-launch.sh status - the read-only supervision verdict (this branch)
+================================================================
+  fixture home away mode: off    -> off
+  fixture home away mode: daemon -> daemon
+  fixture home away mode: dead   -> armed-no-daemon
+
+  (the "daemon" and "dead" homes carry the SAME state/.afk file on disk;
+   only the liveness of the process recorded in the daemon lock differs.)
+
+================================================================
+2. TURN END, Stop-owned watcher auto-arm (bin/fm-claude-stop-autoarm.sh)
+================================================================
+
+--- BASE ef35d799a846d676c2fd30b1d1e3ed47b0fb2c22 - away flag present, daemon DEAD (the reported defect)
+
+[hook exit=0]  [watcher arm ran: NO - hook stood down]  [state/.afk still present: yes]
+
+--- THIS BRANCH - away flag present, daemon DEAD
+firstmate watcher wake - one supervision event needs a handling turn now.
+AWAY MODE IS FLAGGED BUT ITS DAEMON IS NOT RUNNING - state/.afk is set and no away-mode daemon holds this home, so away mode is supervising nothing and this Stop-owned arm is the only cover. Load /afk to restart the daemon, or exit away mode.
+stale: demo-task no progress for 21m
+Run bin/fm-wake-drain.sh first, handle the wake, then run its exact WAKE_ACK_REQUIRED --ack-through command. Until that post-handling acknowledgement, interruption leaves the wake durable for idempotent re-handling. This Stop hook owns watcher continuity: when the handling turn ends, the next needed cycle arms automatically - do NOT run bin/fm-watch-arm.sh after an ordinary wake.
+
+[hook exit=2]  [watcher arm ran: yes]  [state/.afk still present: yes]
+
+--- THIS BRANCH - away flag present, daemon ALIVE (must be unchanged: one supervision cycle, the daemon's)
+
+[hook exit=0]  [watcher arm ran: NO - hook stood down]  [state/.afk still present: yes]
+
+--- BASE ef35d799a846d676c2fd30b1d1e3ed47b0fb2c22 - away flag present, daemon ALIVE (control)
+
+[hook exit=0]  [watcher arm ran: NO - hook stood down]  [state/.afk still present: yes]
+
+================================================================
+3. TURN END, supervision guard block reason (bin/fm-turnend-guard.sh)
+================================================================
+
+--- BASE ef35d799a846d676c2fd30b1d1e3ed47b0fb2c22 - away flag present, daemon DEAD
+●━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+●  TURN WOULD END BLIND - SUPERVISION IS OFF
+●  1 task(s) in flight, but no live watcher holds this home lock (last beat: never).
+●  Away mode owns watcher supervision; load /afk and ensure the daemon is running instead of starting normal supervision directly.
+●━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+[guard exit=2]
+
+--- THIS BRANCH - away flag present, daemon DEAD
+●━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+●  TURN WOULD END BLIND - SUPERVISION IS OFF
+●  1 task(s) in flight, but no live watcher holds this home lock (last beat: never).
+●  Away mode is flagged but its daemon is NOT running, so nothing owns supervision; load /afk to restart the daemon, or exit away mode - and until one of those happens normal harness supervision is the only cover left, so watcher supervision needs Stop-owned automatic recovery; inspect the hook registration and startup status before ending the turn.
+●━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+[guard exit=2]
+
+--- THIS BRANCH - away flag present, daemon ALIVE (unchanged guidance)
+●━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+●  TURN WOULD END BLIND - SUPERVISION IS OFF
+●  1 task(s) in flight, but no live watcher holds this home lock (last beat: never).
+●  Away mode owns watcher supervision; load /afk and ensure the daemon is running instead of starting normal supervision directly.
+●━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+[guard exit=2]
+
+================================================================
+4. SESSION START digest (bin/fm-session-start.sh) - what the first mate is told on restart
+================================================================
+
+--- BASE ef35d799a846d676c2fd30b1d1e3ed47b0fb2c22 - away flag present, daemon DEAD: supervision line, AFK section, next step
+
+[supervision operating instructions]
+- Away mode: active; load /afk and keep normal harness supervision paused while the daemon owns the watcher.
+
+[fleet digest, AFK subsection]
+present - away-mode supervision is active; the daemon owns the watcher.
+
+[next step]
+Away mode is active. Follow the supervision operating instructions block above:
+load /afk and ensure the daemon is running, because the daemon owns watcher
+supervision.
+
+--- THIS BRANCH - away flag present, daemon DEAD
+
+[supervision operating instructions]
+- Away mode: FLAGGED WITH NO DAEMON - state/.afk is set and no away-mode daemon is running, so away mode owns nothing; load /afk to restart the daemon or exit away mode, and keep normal harness supervision armed until then.
+
+[fleet digest, AFK subsection]
+present, but NO away-mode daemon is running - away mode owns nothing, so
+normal harness supervision stays armed. Load /afk to restart the daemon, or
+exit away mode.
+
+[next step]
+Away mode is flagged but its daemon is NOT running, so nothing is supervising
+this home. Load /afk to restart the daemon, or exit away mode, and follow the
+supervision operating instructions block above meanwhile.
+
+--- THIS BRANCH - away flag present, daemon ALIVE (unchanged)
+
+[supervision operating instructions]
+- Away mode: active; load /afk and keep normal harness supervision paused while the daemon owns the watcher.
+
+[fleet digest, AFK subsection]
+present - away-mode supervision is active; the daemon owns the watcher.
+
+[next step]
+Away mode is active. Follow the supervision operating instructions block above:
+load /afk and ensure the daemon is running, because the daemon owns watcher
+supervision.
+
+================================================================
+5. ENTERING away mode natively: the entry can no longer claim a supervision it has not got
+================================================================
+
+--- bin/fm-afk-launch.sh start-native (this branch)
+  [exit=0]  [state/.afk written: yes]
+
+--- what the /afk skill must now read before it may report away mode active
+  bin/fm-afk-launch.sh status -> armed-no-daemon
+  (not "daemon", so the skill reports away mode NOT running instead of active)
+
+--- and the home is not left blind: the Stop-owned auto-arm still covers it
+firstmate watcher wake - one supervision event needs a handling turn now.
+AWAY MODE IS FLAGGED BUT ITS DAEMON IS NOT RUNNING - state/.afk is set and no away-mode daemon holds this home, so away mode is supervising nothing and this Stop-owned arm is the only cover. Load /afk to restart the daemon, or exit away mode.
+stale: demo-task no progress for 21m
+Run bin/fm-wake-drain.sh first, handle the wake, then run its exact WAKE_ACK_REQUIRED --ack-through command. Until that post-handling acknowledgement, interruption leaves the wake durable for idempotent re-handling. This Stop hook owns watcher continuity: when the handling turn ends, the next needed cycle arms automatically - do NOT run bin/fm-watch-arm.sh after an ordinary wake.
+
+[hook exit=2]  [watcher arm ran: yes]  [state/.afk still present: yes]
+
+================================================================
+6. Flag ownership: no mechanism cleared state/.afk anywhere above
+================================================================
+  h-dead           state/.afk present: yes
+  h-entry          state/.afk present: yes
+  h-guard-dead     state/.afk present: yes
+  h-guard-live     state/.afk present: yes
+  h-live           state/.afk present: yes
+  h-ss-dead        state/.afk present: yes
+  h-ss-live        state/.afk present: yes
+  b-dead           state/.afk present: yes
+  b-guard-dead     state/.afk present: yes
+  b-live           state/.afk present: yes
+  b-ss-dead        state/.afk present: yes
+  s-daemon         state/.afk present: yes
+  s-dead           state/.afk present: yes
+
