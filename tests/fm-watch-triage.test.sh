@@ -1934,7 +1934,7 @@ test_afk_paused_changed_pane_hands_off_plain_stale() {
 # inactivity, so the watcher absorbs it on the long PAUSE_RESURFACE_SECS cadence
 # instead, exactly like a declared pause but kept distinct.
 test_open_decision_stale_absorbed_on_long_cadence_not_wedged() {
-  local dir state fakebin out drain_out capture_file window key pane_hash sig pid back
+  local dir state fakebin out drain_out capture_file window key pane_hash sig pid back churn_hash i
   dir=$(make_case open-decision-held); state="$dir/state"; fakebin="$dir/fakebin"
   out="$dir/watch.out"; drain_out="$dir/drain.out"; capture_file="$dir/pane.txt"
   window="test:fm-held"
@@ -1962,6 +1962,11 @@ test_open_decision_stale_absorbed_on_long_cadence_not_wedged() {
   [ ! -s "$out" ] || fail "open-decision stale printed a wake reason during absorb"
   [ ! -s "$state/.wake-queue" ] || fail "open-decision stale enqueued a wake during absorb"
   [ -e "$state/.decision-held-$key" ] || fail "decision-held marker was not recorded on absorb"
+  # The marker is the persisted record of WHICH status-file reading the fold ran
+  # against, so the re-validate on a later poll can tell "no new line landed"
+  # from "a line landed, re-fold". It must therefore hold that file's own mtime.
+  [ "$(cat "$state/.decision-held-$key" 2>/dev/null || true)" = "$(file_mtime "$state/held.status")" ] \
+    || fail "decision-held marker did not record the status file mtime the fold ran against"
   [ ! -e "$state/.stale-since-$key" ] || fail "open-decision absorb started the wedge timer"
   [ ! -e "$state/.paused-$key" ] || fail "open-decision absorb touched the pause flag"
   [ "$(cat "$state/.stale-$key" 2>/dev/null || true)" = "$pane_hash" ] \
@@ -2017,6 +2022,43 @@ test_open_decision_stale_absorbed_on_long_cadence_not_wedged() {
   [ ! -e "$state/.stale-since-$key" ] || fail "decision re-surface used the wedge timer"
   FM_STATE_OVERRIDE="$state" "$DRAIN" > "$drain_out" 2>/dev/null || fail "drain after the decision re-surface failed"
   grep "$(printf '\tstale\t')" "$drain_out" | grep -F "$window" >/dev/null || fail "decision re-surface was not queued"
+  ack_stopped_cycle "$state" || fail "could not acknowledge the decision-held phase-B re-surface"
+
+  # Phase C: the pane content churns (a ticking clock, a token counter, a
+  # scrolling log line) while the SAME decision stays open and the status file
+  # stays untouched. A hash change resets the per-absorb bookkeeping and hands the
+  # pane back to first-sight, so the only thing keeping this within one re-surface
+  # per window is the throttle marker surviving that reset. It must: the decision
+  # just re-surfaced, so the crew must now stay silent for a full window, not wake
+  # firstmate again on every churn cycle - which would be more often than the
+  # 4-minute wedge cadence this whole path replaces.
+  printf 'idle, awaiting captain decision (17204 tokens)\n' > "$capture_file"
+  churn_hash=$(hash_text "idle, awaiting captain decision (17204 tokens)")
+  : > "$out"
+  PATH="$fakebin:$PATH" FM_FAKE_TMUX_WINDOW="$window" FM_FAKE_TMUX_CAPTURE="$capture_file" \
+    FM_FAKE_TMUX_CURRENT_COMMAND=zsh \
+    FM_STATE_OVERRIDE="$state" FM_CREW_STATE_BIN="$fakebin/fm-crew-state.sh" \
+    FM_STALE_ESCALATE_SECS=240 FM_PAUSE_RESURFACE_SECS=240 FM_POLL=1 FM_SIGNAL_GRACE=1 \
+    FM_CHECK_INTERVAL=999999 FM_HEARTBEAT=999999 "$WATCH" > "$out" &
+  pid=$!
+  i=0
+  while [ "$i" -lt 100 ]; do
+    [ "$(cat "$state/.stale-$key" 2>/dev/null || true)" = "$churn_hash" ] && break
+    is_live_non_zombie "$pid" || break
+    sleep 0.1
+    i=$((i + 1))
+  done
+  if ! is_live_non_zombie "$pid"; then
+    reap "$pid"; fail "the churned pane re-surfaced within the window instead of staying absorbed: $(cat "$out")"
+  fi
+  [ "$(cat "$state/.stale-$key" 2>/dev/null || true)" = "$churn_hash" ] \
+    || { reap "$pid"; fail "the churned pane was never re-absorbed on the long cadence"; }
+  [ ! -s "$out" ] || { reap "$pid"; fail "the churned pane printed a wake inside the re-surface window"; }
+  [ ! -s "$state/.wake-queue" ] || { reap "$pid"; fail "the churned pane enqueued a wake inside the re-surface window"; }
+  [ -e "$state/.decision-resurfaced-$key" ] \
+    || { reap "$pid"; fail "the re-surface throttle marker did not survive the hash change"; }
+  [ ! -e "$state/.stale-since-$key" ] || { reap "$pid"; fail "the churned pane re-armed the wedge timer"; }
+  reap "$pid"
   unset FM_FAKE_CREW_STATE
   pass "an open captain decision is absorbed on the long cadence and re-surfaced as a recheck, never wedge-escalated"
 }
