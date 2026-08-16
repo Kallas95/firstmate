@@ -381,11 +381,19 @@ fm_afk_daemon_owns_supervision() {
 # session already looks. Silent otherwise. <what-covers-this-home> names the
 # mechanism that took over, because that is the only part that differs per
 # harness and duplicating the sentence per hook is how the wordings drift apart.
+# Pass it EMPTY on a path that just reported its own mechanism broken: claiming a
+# cover in the same breath as its failure is the very "supervision that does not
+# exist" this contract exists to stop, so that case says nothing covers the home.
 fm_afk_daemon_down_notice() {
-  local state=$1 cover=$2
+  local state=$1 cover=$2 clause
   [ -e "$state/.afk" ] || return 0
   fm_afk_daemon_alive "$state" && return 0
-  printf 'AWAY MODE IS FLAGGED BUT ITS DAEMON IS NOT RUNNING - state/.afk is set and no away-mode daemon holds this home, so away mode is supervising nothing and %s is the only cover. Load /afk to restart the daemon, or exit away mode.\n' "$cover"
+  if [ -n "$cover" ]; then
+    clause="$cover is the only cover"
+  else
+    clause='nothing is covering this home'
+  fi
+  printf 'AWAY MODE IS FLAGGED BUT ITS DAEMON IS NOT RUNNING - state/.afk is set and no away-mode daemon holds this home, so away mode is supervising nothing and %s. Load /afk to restart the daemon, or exit away mode.\n' "$clause"
 }
 
 fm_lock_clean_known_files() {

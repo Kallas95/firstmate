@@ -1304,8 +1304,8 @@ SH
 # down on it would leave the home unsupervised and silent. The state itself is
 # proven in tests/fm-afk-launch.test.sh; what matters here is that the plugin
 # asks that owner rather than testing the flag, and which answer arms it.
-opencode_afk_stand_down_case() {  # <name> <status-line> <expect-arm 0|1>
-  local name=$1 status_line=$2 expect_arm=$3 plugin repo home log out status
+opencode_afk_stand_down_case() {  # <name> <status-line> <expect-arm 0|1> [launcher-executable 0|1]
+  local name=$1 status_line=$2 expect_arm=$3 launcher_exec=${4:-1} plugin repo home log out status
   plugin="$ROOT/.opencode/plugins/fm-primary-watch-arm.js"
   repo="$TMP_ROOT/opencode-afk-$name-root"
   home="$TMP_ROOT/opencode-afk-$name-home"
@@ -1325,7 +1325,11 @@ SH
 [ "\${1:-}" = status ] || exit 2
 printf '%s\n' '$status_line'
 SH
-  chmod +x "$repo/bin/fm-watch-arm.sh" "$repo/bin/fm-afk-launch.sh"
+  chmod +x "$repo/bin/fm-watch-arm.sh"
+  # A launcher without its executable bit stands in for Windows, where a .sh can
+  # never be executed directly: the plugin has to reach the away-mode owner
+  # through bash, or it reads every live daemon as absent and arms over it.
+  [ "$launcher_exec" -eq 0 ] || chmod +x "$repo/bin/fm-afk-launch.sh"
   out=$(PLUGIN="$plugin" WORKTREE="$repo" FM_HOME="$home" FM_ARM_LOG="$log" node 2>&1 <<'EOF'
 import { existsSync, writeFileSync } from "node:fs";
 import { pathToFileURL } from "node:url";
@@ -1359,6 +1363,7 @@ EOF
 test_opencode_plugin_stands_down_only_for_a_live_away_daemon() {
   opencode_afk_stand_down_case live daemon 0
   opencode_afk_stand_down_case dead armed-no-daemon 1
+  opencode_afk_stand_down_case live-nonexecutable-launcher daemon 0 0
   pass "OpenCode watcher plugin stands down for a live away daemon and stays armed without one"
 }
 

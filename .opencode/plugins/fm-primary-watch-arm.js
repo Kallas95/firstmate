@@ -107,9 +107,12 @@ async function isPrimaryRoot(root, home) {
 // bin/fm-afk-launch.sh - the single owner of that predicate - whether a daemon
 // is actually alive (docs/watcher-continuity.md "Away-mode stand-down"). An
 // unreadable answer keeps this plugin armed, which is the safe direction.
+// Launched through bash like every other script this plugin runs: Windows cannot
+// execute a .sh directly, and there the failure is systematic rather than
+// unreadable - it would arm a second cycle on top of every live away daemon.
 async function afkDaemonOwnsSupervision(paths) {
   if (!existsSync(`${paths.state}/.afk`)) return false;
-  const result = await runProcess(`${paths.root}/bin/fm-afk-launch.sh`, ["status"], {
+  const result = await runProcess("bash", [`${paths.root}/bin/fm-afk-launch.sh`, "status"], {
     env: { ...process.env, FM_HOME: paths.home, FM_STATE_OVERRIDE: paths.state },
   });
   if (result.code !== 0) return false;
@@ -125,7 +128,7 @@ async function afkDaemonOwnsSupervision(paths) {
 // away mode, and an unreadable answer stays silent rather than inventing one.
 async function awayModeDownNotice(paths) {
   if (!existsSync(`${paths.state}/.afk`)) return "";
-  const result = await runProcess(`${paths.root}/bin/fm-afk-launch.sh`, ["down-notice", "this plugin-owned watcher cycle"], {
+  const result = await runProcess("bash", [`${paths.root}/bin/fm-afk-launch.sh`, "down-notice", "this plugin-owned watcher cycle"], {
     env: { ...process.env, FM_HOME: paths.home, FM_STATE_OVERRIDE: paths.state },
   });
   if (result.code !== 0) return "";

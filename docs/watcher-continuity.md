@@ -41,6 +41,7 @@ Liveness is proven by the same recorded process identity the lock already carrie
 `bin/fm-afk-launch.sh status` exposes the state to callers that cannot source bash, and takes no lock so a concurrent launch never delays the answer.
 `bin/fm-afk-launch.sh down-notice <cover>` exposes the alarm sentence itself the same way, so the JavaScript plugin and the TypeScript extension print the one wording `fm_afk_daemon_down_notice` owns rather than each keeping a copy that drifts.
 `<cover>` names the mechanism supervising in place of the dead daemon, the only part that differs per harness.
+A banner that has just reported its own mechanism broken passes no cover at all, and the sentence then says nothing is covering the home: an alarm that claims a supervisor in the same breath as its failure is the same "supervision that does not exist" this contract exists to stop.
 
 In `armed-no-daemon`, supervision is restored by the ordinary mechanism - the whole ordinary mechanism, including the watcher's own triage.
 A re-armed watcher that still one-shot every benign signal, every distinct stale hash, and every heartbeat would hand them to a daemon that is not there to absorb them, and each handoff costs a model turn; the ordinary triage absorbs them exactly as it does outside away mode.

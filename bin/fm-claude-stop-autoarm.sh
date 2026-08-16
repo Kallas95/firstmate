@@ -165,8 +165,10 @@ write_epoch() {  # <outcome>
 # One line, printed with any banner this hook emits, whenever away mode is
 # flagged with no daemon behind it. Without it the model handles the wake, ends
 # the turn, arms again, and never learns that away mode stopped supervising.
-afk_daemon_down_notice() {
-  fm_afk_daemon_down_notice "$STATE" 'this Stop-owned arm'
+# The caller names what covers the home, because that differs by banner: the
+# rewake ran a successful arm, the failure banner has none left to offer.
+afk_daemon_down_notice() {  # [what-covers-this-home]
+  fm_afk_daemon_down_notice "$STATE" "${1-}"
 }
 
 write_epoch arming
@@ -253,7 +255,7 @@ if [ "$ACTIONABLE" -eq 1 ]; then
   write_epoch rewake
   {
     printf 'firstmate watcher wake - one supervision event needs a handling turn now.\n'
-    afk_daemon_down_notice
+    afk_daemon_down_notice 'this Stop-owned arm'
     [ -n "$OUT" ] && grep -E '^(signal:|stale:|check:|heartbeat)' "$OUT" 2>/dev/null | head -8
     printf 'Run bin/fm-wake-drain.sh first, handle the wake, then run its exact WAKE_ACK_REQUIRED --ack-through command. Until that post-handling acknowledgement, interruption leaves the wake durable for idempotent re-handling. This Stop hook owns watcher continuity: when the handling turn ends, the next needed cycle arms automatically - do NOT run bin/fm-watch-arm.sh after an ordinary wake.\n'
   } >&2

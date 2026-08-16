@@ -282,6 +282,9 @@ test_arms_when_afk_flag_has_no_daemon() {
   [ "$(epoch_outcome "$dir")" = rewake ] || fail "epoch must record outcome=rewake, got: $(epoch_outcome "$dir")"
   assert_contains "$out" "AWAY MODE IS FLAGGED BUT ITS DAEMON IS NOT RUNNING" \
     "the rewake banner must name the broken away mode, or the model never learns to repair it"
+  # This banner follows a SUCCESSFUL arm, so the cover it claims is real.
+  assert_contains "$out" "this Stop-owned arm is the only cover" \
+    "the rewake banner must name the arm that took over from the dead daemon"
   assert_present "$dir/state/.afk" "the hook must never clear the captain's away-mode flag"
   pass "auto-arm: arms and names the failure when away mode is flagged with no daemon"
 }
@@ -297,6 +300,12 @@ test_failed_arm_under_dead_afk_daemon_names_both_failures() {
   assert_contains "$out" "auto-arm FAILED" "the arm failure must still be reported"
   assert_contains "$out" "AWAY MODE IS FLAGGED BUT ITS DAEMON IS NOT RUNNING" \
     "a failed arm must also name the away mode that is supervising nothing"
+  # The banner has just reported this very mechanism broken with no live watcher
+  # verified, so claiming it covers the home would contradict its own alarm.
+  assert_contains "$out" "nothing is covering this home" \
+    "the failure banner must say the home is uncovered"
+  assert_not_contains "$out" "is the only cover" \
+    "the failure banner claimed a cover in the same breath as reporting itself broken"
   pass "auto-arm: a failed arm under a dead away daemon names both failures"
 }
 
