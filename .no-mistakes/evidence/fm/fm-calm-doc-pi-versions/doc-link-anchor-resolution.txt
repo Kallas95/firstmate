@@ -1,0 +1,13 @@
+ok   line   6  [`calm.md`](calm.md)  -> calm.md
+ok   line  17  [`calm.md`](calm.md#pi-compatibility)  -> calm.md anchor #pi-compatibility
+ok   line  19  [2026-08-16 verification record](#2026-08-16-pi-0842-installed-version-verification)  -> same-document anchor #2026-08-16-pi-0842-installed-version-verification
+ok   line  34  [`calm.md`](calm.md#pi-compatibility)  -> calm.md anchor #pi-compatibility
+ok   line  93  [compatibility contract](calm.md#pi-compatibility)  -> calm.md anchor #pi-compatibility
+ok   line 151  [compatibility contract](calm.md#pi-compatibility)  -> calm.md anchor #pi-compatibility
+ok   line 163  [2026-07-30 revision verification](#2026-07-30-calm-working-presentation-revision-verification)  -> same-document anchor #2026-07-30-calm-working-presentation-revision-verification
+ok   line 199  [`docs/configuration.md`](configuration.md#pi-calm-preference-configcalm)  -> configuration.md anchor #pi-calm-preference-configcalm
+ok   line 247  [compatibility contract](calm.md#pi-compatibility)  -> calm.md anchor #pi-compatibility
+ok   line 267  [2026-08-16 verification record](#2026-08-16-pi-0842-installed-version-verification)  -> same-document anchor #2026-08-16-pi-0842-installed-version-verification
+ok   line 534  [Built-in tool override constraints](#built-in-tool-override-constraints)  -> same-document anchor #built-in-tool-override-constraints
+
+headings=20 links_checked=11 broken=0

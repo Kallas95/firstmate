@@ -1,0 +1,33 @@
+# Reproducing the claims recorded in docs/calm-mode-feasibility.md on 2026-08-16
+
+$ pi --version
+0.84.2
+
+$ jq -r .version "$(npm root -g)/@earendil-works/pi-coding-agent/package.json"
+0.84.2
+
+$ grep -oE 'AssistantMessageComponent|InteractiveMode' dist/index.d.ts | sort -u
+AssistantMessageComponent
+InteractiveMode
+
+$ grep -oE 'updateContent|addMessageToChat' dist/modes/interactive/components/assistant-message.d.ts dist/modes/interactive/interactive-mode.d.ts | sort -u
+dist/modes/interactive/components/assistant-message.d.ts:updateContent
+dist/modes/interactive/interactive-mode.d.ts:addMessageToChat
+
+# Runtime probe of the two seams the Calm adapters patch (stronger than the declaration read):
+$ node -e "import('file://$(npm root -g)/@earendil-works/pi-coding-agent/dist/index.js') ..."
+typeof AssistantMessageComponent                    = function
+typeof AssistantMessageComponent.prototype.updateContent = function
+typeof InteractiveMode                              = function
+typeof InteractiveMode.prototype.addMessageToChat   = function
+
+$ tests/fm-pi-primary-types.test.sh
+skip: tsc not found for Pi extension typecheck
+
+# 0.84.2 CHANGELOG lines behind the doc's 'what moved in 0.84.2' claims:
+14:- Added experimental strict JSON-schema constrained sampling for the default `read`, `bash`, `edit`, and `write` tools under `PI_EXPERIMENTAL=1`.
+16:- Added the `defaultTools` setting for configuring the initial built-in tool selection globally or per project.
+18:- Added `expandPromptTemplates` to extension `pi.sendUserMessage()` options for explicitly dispatching commands and expanding skills and prompt templates. See [`pi.sendUserMessage()`](docs/extensions.md#pisendusermessagecontent-options) ([#7857](https://github.com/earendil-works/pi/pull/7857) by [@mrexodia](https://github.com/mrexodia)).
+39:- Fixed fallback rendering for extension tool results to collapse long output and honor tool expansion ([#7979](https://github.com/earendil-works/pi/issues/7979)).
+42:- Fixed the `defaultTools` setting dropping extension and SDK custom tools when selecting built-in defaults.
+369:- Added inherited `supportsGrammarTools` and `supportsStrictTools` compatibility flags, expanded `supportsStrictMode` coverage, and generated model capability metadata to gate constrained sampling.

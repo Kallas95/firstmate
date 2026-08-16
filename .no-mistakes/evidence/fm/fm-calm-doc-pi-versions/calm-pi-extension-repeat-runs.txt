@@ -1,0 +1,7 @@
+=== repeat run 2 ===
+run 2: FAIL
+9:not ok - Pi follow-up loaded_off case rendered a duplicate captain answer
+=== repeat run 3 ===
+run 3: PASS (12 ok lines)
+=== repeat run 4 ===
+run 4: PASS (12 ok lines)

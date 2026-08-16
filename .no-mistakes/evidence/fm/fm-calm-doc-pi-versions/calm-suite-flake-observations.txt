@@ -1,0 +1,10 @@
+runs of tests/fm-calm-pi-extension.test.sh against the installed Pi 0.84.2 on 2026-08-16
+run 1: PASS (12/12 ok, 49s) - transcript identical to the doc's 2026-08-16 record
+run 2: FAIL - not ok - Pi follow-up loaded_off case rendered a duplicate captain answer
+run 3: PASS (12/12 ok)
+run 4: PASS (12/12 ok)
+
+The failing assertion is the shared pane-capture check in tests/fm-calm-pi-extension.test.sh:1820-1822,
+which greps the tmux pane for exactly one CAPTAIN_ANSWER_$label right after the session file records
+MONITOR_HANDLED_${label}_ONE. Every follow-up case label goes through it, so the documented race is not
+limited to the 'adjacent' case named in the doc's 2026-08-16 entry.
