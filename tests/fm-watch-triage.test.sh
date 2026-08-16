@@ -121,6 +121,17 @@ record_pi_busy() {  # <state-dir> <id>
     --source pi-ext --event agent-start
 }
 
+# Same semantic busy-state channel as record_pi_busy, for either verdict. Lets a
+# test flip a pane between busy and idle WITHOUT touching its rendered content,
+# so the pane hash can stay fixed across the flip - the shape a real backend
+# reports when an agent starts or dies behind an unchanged screen.
+record_pi_state() {  # <state-dir> <id> <busy|idle>
+  local state=$1 id=$2 want=$3 gen
+  gen=$("$ROOT/bin/fm-busy-event.sh" arm "$state" "$id")
+  "$ROOT/bin/fm-busy-event.sh" apply "$state" "$id" "$want" --gen "$gen" \
+    --source pi-ext --event "test-$want"
+}
+
 reap() { kill "$1" 2>/dev/null || true; wait "$1" 2>/dev/null || true; }
 
 # --- pure classifier predicates (fm-classify-lib.sh) ------------------------
@@ -1962,11 +1973,15 @@ test_open_decision_stale_absorbed_on_long_cadence_not_wedged() {
   [ ! -s "$out" ] || fail "open-decision stale printed a wake reason during absorb"
   [ ! -s "$state/.wake-queue" ] || fail "open-decision stale enqueued a wake during absorb"
   [ -e "$state/.decision-held-$key" ] || fail "decision-held marker was not recorded on absorb"
-  # The marker is the persisted record of WHICH status-file reading the fold ran
-  # against, so the re-validate on a later poll can tell "no new line landed"
-  # from "a line landed, re-fold". It must therefore hold that file's own mtime.
-  [ "$(cat "$state/.decision-held-$key" 2>/dev/null || true)" = "$(file_mtime "$state/held.status")" ] \
-    || fail "decision-held marker did not record the status file mtime the fold ran against"
+  # The marker is the persisted record of WHICH pane hash this absorb was taken
+  # on and WHICH status-file reading its fold ran against, so a later poll can
+  # tell "still the absorbed hash" from a re-classified one, and "no new line
+  # landed" from "a line landed, re-fold". Its append-detecting signature is the
+  # same size:mtime token the signal scan dedupes on, not a bare mtime a
+  # same-second closing append could slip through.
+  [ "$(cat "$state/.decision-held-$key" 2>/dev/null || true)" \
+    = "$(printf '%s\t%s' "$pane_hash" "$(seen_sig "$state/held.status")")" ] \
+    || fail "decision-held marker did not record the absorbed hash and the folded status signature"
   [ ! -e "$state/.stale-since-$key" ] || fail "open-decision absorb started the wedge timer"
   [ ! -e "$state/.paused-$key" ] || fail "open-decision absorb touched the pause flag"
   [ "$(cat "$state/.stale-$key" 2>/dev/null || true)" = "$pane_hash" ] \
@@ -2132,6 +2147,111 @@ test_open_decision_not_working_surfaces_immediately() {
   pass "an open captain decision never absorbs a crew that is not provably working"
 }
 
+# --- a decision-held absorb never outlives the hash it was taken on ---------
+# The absorb marker is what the later polls of an absorbed hash route on, so it
+# must mean exactly "the last first-sight absorbed THIS hash as decision-held".
+# When it outlives its absorb, a pane that has since been re-classified is handed
+# the one-hour cadence with its wedge timer disarmed - and because a decision the
+# captain answered in the pane never closes in the fold, nothing ever takes it
+# back. The reachable leak: a crew parked past BUSY_TURN_MAX_SECS goes busy again
+# at a new hash, which routes through the wedge timer rather than the plain reset,
+# then dies before finishing its turn. The frozen pane must keep surfacing as the
+# stale it is, poll after poll.
+test_decision_held_marker_does_not_outlive_its_absorb() {
+  local dir state fakebin out capture_file window key h1 h2 sig pid back
+  dir=$(make_case decision-held-residual); state="$dir/state"; fakebin="$dir/fakebin"
+  out="$dir/watch.out"; capture_file="$dir/pane.txt"
+  window="test:fm-parked"
+  printf 'window=%s\nkind=ship\nharness=pi\n' "$window" > "$state/parked.meta"
+  # Answered in the pane, so no resolved line ever lands: the fold stays open for
+  # good, which is what makes an escaped marker permanent rather than transient.
+  printf 'needs-decision [key=api-shape]: pick A or B\n' > "$state/parked.status"
+  back=$(( $(date +%s) - 500 ))
+  if [ "$(uname)" = Darwin ]; then touch -mt "$(date -r "$back" '+%Y%m%d%H%M.%S')" "$state/parked.status"
+  else touch -m -d "@$back" "$state/parked.status"; fi
+  sig=$(seen_sig "$state/parked.status"); printf '%s' "$sig" > "$state/.seen-parked_status"
+  key=$(printf '%s' "$window" | tr ':/.' '___')
+  h1=$(hash_text "waiting on the captain")
+  h2=$(hash_text "resuming after the answer")
+
+  # Phase A: parked and provably working -> absorbed as decision-held at h1.
+  printf 'waiting on the captain\n' > "$capture_file"
+  printf '%s' "$h1" > "$state/.hash-$key"
+  printf '1\n' > "$state/.count-$key"
+  record_pi_state "$state" parked idle
+  export FM_FAKE_CREW_STATE='state: working · source: run-step · validating (running)'
+  PATH="$fakebin:$PATH" FM_FAKE_TMUX_WINDOW="$window" FM_FAKE_TMUX_CAPTURE="$capture_file" \
+    FM_STATE_OVERRIDE="$state" FM_CREW_STATE_BIN="$fakebin/fm-crew-state.sh" \
+    FM_STALE_ESCALATE_SECS=999 FM_PAUSE_RESURFACE_SECS=999 FM_POLL=1 FM_SIGNAL_GRACE=1 \
+    FM_CHECK_INTERVAL=999999 FM_HEARTBEAT=999999 "$WATCH" > "$out" &
+  pid=$!
+  if ! wait_live "$pid" 30; then
+    reap "$pid"; fail "the parked crew was not absorbed as decision-held: $(cat "$out")"
+  fi
+  [ -e "$state/.decision-held-$key" ] || { reap "$pid"; fail "no decision-held absorb to test the residual against"; }
+  reap "$pid"
+  ack_stopped_cycle "$state" || fail "could not acknowledge the residual-marker phase-A stop"
+
+  # Phase B: the crew resumes - pane busy at a NEW hash, and parked longer than
+  # BUSY_TURN_MAX_SECS, so the reset routes through the wedge timer instead of the
+  # plain erase. That is the sub-branch the marker used to survive.
+  printf 'resuming after the answer\n' > "$capture_file"
+  record_pi_state "$state" parked busy
+  touch -t 200001010000 "$state/parked.meta"
+  : > "$out"
+  PATH="$fakebin:$PATH" FM_FAKE_TMUX_WINDOW="$window" FM_FAKE_TMUX_CAPTURE="$capture_file" \
+    FM_STATE_OVERRIDE="$state" FM_CREW_STATE_BIN="$fakebin/fm-crew-state.sh" \
+    FM_BUSY_TURN_MAX_SECS=1 FM_STALE_ESCALATE_SECS=999 FM_PAUSE_RESURFACE_SECS=240 \
+    FM_POLL=1 FM_SIGNAL_GRACE=1 FM_CHECK_INTERVAL=999999 FM_HEARTBEAT=999999 "$WATCH" > "$out" &
+  pid=$!
+  if ! wait_live "$pid" 40; then
+    reap "$pid"; fail "the resumed busy pane surfaced before the wedge threshold: $(cat "$out")"
+  fi
+  [ "$(cat "$state/.hash-$key" 2>/dev/null || true)" = "$h2" ] \
+    || { reap "$pid"; fail "the resumed pane's new hash was never recorded"; }
+  reap "$pid"
+  ack_stopped_cycle "$state" || fail "could not acknowledge the residual-marker phase-B stop"
+
+  # Phase C: the agent dies mid-turn. The backend reports idle again while the
+  # frozen pane still renders h2, so first sight finds a crew that is NOT provably
+  # working and must surface it at once - which it does, then and now.
+  record_pi_state "$state" parked idle
+  export FM_FAKE_CREW_STATE='state: stopped · source: pane · bare shell'
+  sig=$(seen_sig "$state/parked.status"); printf '%s' "$sig" > "$state/.seen-parked_status"
+  : > "$out"
+  PATH="$fakebin:$PATH" FM_FAKE_TMUX_WINDOW="$window" FM_FAKE_TMUX_CAPTURE="$capture_file" \
+    FM_STATE_OVERRIDE="$state" FM_CREW_STATE_BIN="$fakebin/fm-crew-state.sh" \
+    FM_BUSY_TURN_MAX_SECS=1 FM_STALE_ESCALATE_SECS=999 FM_PAUSE_RESURFACE_SECS=240 \
+    FM_POLL=1 FM_SIGNAL_GRACE=1 FM_CHECK_INTERVAL=999999 FM_HEARTBEAT=999999 "$WATCH" > "$out" &
+  pid=$!
+  wait_for_exit "$pid" 60 || fail "the dead crew's frozen pane was never surfaced: $(cat "$out")"
+  grep -F "stale: $window" "$out" >/dev/null || fail "the dead crew's frozen pane did not surface as stale"
+  ack_stopped_cycle "$state" || fail "could not acknowledge the dead-crew surface"
+
+  # Phase D: the pane is unchanged, so this is a LATER poll of the hash first
+  # sight just surfaced. A marker left over from phase A's absorb would route it
+  # to the decision-held cadence here - swallowing a dead crew for a whole
+  # PAUSE_RESURFACE_SECS window, on repeat, since the decision never closes.
+  sig=$(seen_sig "$state/parked.status"); printf '%s' "$sig" > "$state/.seen-parked_status"
+  : > "$out"
+  PATH="$fakebin:$PATH" FM_FAKE_TMUX_WINDOW="$window" FM_FAKE_TMUX_CAPTURE="$capture_file" \
+    FM_STATE_OVERRIDE="$state" FM_CREW_STATE_BIN="$fakebin/fm-crew-state.sh" \
+    FM_BUSY_TURN_MAX_SECS=1 FM_STALE_ESCALATE_SECS=999 FM_PAUSE_RESURFACE_SECS=240 \
+    FM_POLL=1 FM_SIGNAL_GRACE=1 FM_CHECK_INTERVAL=999999 FM_HEARTBEAT=999999 "$WATCH" > "$out" &
+  pid=$!
+  if ! wait_live "$pid" 40; then
+    reap "$pid"
+    fail "a residual decision-held marker re-absorbed a dead crew onto the long cadence: $(cat "$out")"
+  fi
+  grep -F "awaiting captain" "$out" >/dev/null \
+    && { reap "$pid"; fail "a dead crew was rechecked as a held decision instead of staying surfaced"; }
+  [ ! -e "$state/.decision-held-$key" ] \
+    || { reap "$pid"; fail "the decision-held marker outlived the absorb it was written for"; }
+  reap "$pid"
+  unset FM_FAKE_CREW_STATE
+  pass "a decision-held marker never outlives its absorb to swallow a re-classified pane"
+}
+
 # --- the decision closes: normal wedge cadence resumes immediately ----------
 # A crew that stays mute AFTER the captain's answer is a real wedge and must
 # re-escalate. Once the decision fold closes (a resolved line lands),
@@ -2153,11 +2273,12 @@ test_open_decision_closure_resumes_normal_cadence() {
   printf '%s' "$pane_hash" > "$state/.hash-$key"
   printf '1\n' > "$state/.count-$key"
   # Pretend a prior decision-held absorb so the closure branch is the path under
-  # test: the marker exists but records a status mtime that no longer matches (a
-  # resolved line has since landed), which is exactly what forces the bounded
-  # re-validating fold. The fold now reports closed, so the watcher must clear the
-  # tracking and re-evaluate from a clean first-sight.
-  printf '1\n' > "$state/.decision-held-$key"
+  # test: the marker names THIS pane hash, so the later-poll triage routes to it,
+  # but records a status signature that no longer matches (a resolved line has
+  # since landed), which is exactly what forces the bounded re-validating fold.
+  # The fold now reports closed, so the watcher must clear the tracking and
+  # re-evaluate from a clean first-sight.
+  printf '%s\t0:0' "$pane_hash" > "$state/.decision-held-$key"
   printf '%s' "$pane_hash" > "$state/.stale-$key"
   # Crew is NOT provably working (it got its answer and went idle), so the
   # normal non-terminal triage surfaces immediately - the real-wedge re-escalate.
@@ -2266,6 +2387,7 @@ test_nonterminal_stale_paused_absorbed_then_resurfaced
 test_exited_declared_pause_is_bounded_but_live_gate_surfaces
 test_open_decision_stale_absorbed_on_long_cadence_not_wedged
 test_open_decision_not_working_surfaces_immediately
+test_decision_held_marker_does_not_outlive_its_absorb
 test_open_decision_closure_resumes_normal_cadence
 test_closed_decision_stale_wedge_escalates_like_today
 test_secondmate_paused_resurfaces_in_normal_mode

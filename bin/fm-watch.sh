@@ -407,7 +407,8 @@ clear_pause_tracking() {  # <window>
   key=${key//\//_}
   key=${key//./_}
   clear_pause_state "$win"
-  rm -f "$STATE/.stale-$key" "$STATE/.stale-since-$key" "$STATE/.wedge-escalations-$key"
+  rm -f "$STATE/.stale-$key" "$STATE/.stale-since-$key" "$STATE/.wedge-escalations-$key" \
+    "$STATE/.decision-held-$key"
 }
 
 # Absorb a PROVABLY-WORKING stale pane whose inactivity is explained by a
@@ -420,41 +421,72 @@ clear_pause_tracking() {  # <window>
 # case where a crew parked on a captain decision fired a stale every four
 # minutes, each costing a full firstmate turn only to conclude "still waiting for
 # the same decision". Only ever reached from a first-sight path that already
-# proved the crew working, or from a later poll of a pane that path absorbed, so
-# a crew that stopped or died while a decision stayed open is never swallowed
-# here - it keeps surfacing through the ordinary terminal/non-terminal triage.
+# proved the crew working, or from a later poll of the SAME hash that path
+# absorbed, so a crew that stopped or died while a decision stayed open is never
+# swallowed here - it keeps surfacing through the ordinary terminal/non-terminal
+# triage. That bound rests on the marker naming the hash it was written for
+# (decision_held_absorbed is the only reader): a marker outliving its absorb -
+# through a reset sub-branch, a pause-tracking reset, anything - can then never
+# re-route a later, differently-classified pane onto this cadence.
 #
 # Re-validating the decision must stay cheap: task_has_open_decision re-folds the
 # status file's entire lifetime, so on a later poll it runs ONLY when a new line
-# could have closed the decision. The .decision-held-<key> marker carries the
-# status-file mtime the fold last ran against; an unchanged mtime means no line
-# landed, so the decision is still open and the absorb continues without folding.
-# On a changed mtime the fold re-runs: still open re-stamps the marker, closed
-# clears the tracking and returns 1 so the caller skips this poll and the normal
-# wedge cadence resumes from a clean first-sight on the next one - a crew that
-# stays mute AFTER the answer is a real wedge and re-escalates exactly as before.
+# could have closed the decision. The marker's second field is the status file's
+# size:mtime signature the fold last ran against - the same append-detecting
+# token scan_signals uses, rather than a bare second-resolution mtime a
+# same-second closing append could slip through. An unchanged signature means no
+# line landed, so the decision is still open and the absorb continues without
+# folding. On a changed signature the fold re-runs: still open re-stamps the
+# marker, closed clears the tracking and returns 1 so the caller skips this poll
+# and the normal wedge cadence resumes from a clean first-sight on the next one -
+# a crew that stays mute AFTER the answer is a real wedge and re-escalates
+# exactly as before.
 #
-# That stored mtime is only sound if it is the one the fold actually saw, so a
-# first-sight caller - which folds itself, before calling - passes ITS pre-fold
-# reading as <folded-status-mtime> and this skips the re-validate. Re-reading the
-# mtime here instead would record a post-fold value: a resolved line landing in
-# between would be stamped as already-folded, the re-validate would never fire on
-# it, and the pane would stay parked on the long cadence past the answer.
-handle_decision_held_stale() {  # <window> <task> <hash> [folded-status-mtime]
-  local win=$1 task=$2 h=$3 mtime=${4-} key held
-  key=$(printf '%s' "$win" | tr ':/.' '___')
-  if [ -z "$mtime" ]; then
-    mtime=$(status_mtime_or_now "$task")
-    held="$STATE/.decision-held-$key"
-    if [ -e "$held" ] && [ "$(cat "$held" 2>/dev/null || true)" != "$mtime" ] \
+# That stored signature is only sound if it is the one the fold actually saw, so
+# a first-sight caller - which folds itself, before calling - passes ITS pre-fold
+# reading as <folded-status-signature> and this skips the re-validate. Reading
+# the signature here instead would record a post-fold value: a resolved line
+# landing in between would be stamped as already-folded, the re-validate would
+# never fire on it, and the pane would stay parked on the long cadence past the
+# answer. The age anchor carries no such ordering requirement - it is read here.
+handle_decision_held_stale() {  # <window> <task> <hash> [folded-status-signature]
+  local win=$1 task=$2 h=$3 sig tok
+  if [ "$#" -ge 4 ]; then
+    sig=$4
+  else
+    sig=$(fm_wake_signal_sig "$STATE/$task.status")
+    tok=$(decision_held_token "$win")
+    if [ -n "$tok" ] && [ "${tok#*$'\t'}" != "$sig" ] \
        && ! task_has_open_decision "$STATE" "$task"; then
       clear_decision_held_tracking "$win"
       return 1
     fi
   fi
-  absorb_stale_on_long_cadence "$win" "$h" "$mtime" decision-held- decision-resurfaced- \
+  absorb_stale_on_long_cadence "$win" "$h" "$(status_mtime_or_now "$task")" \
+    decision-held- decision-resurfaced- \
     'decision held @AGE@s, awaiting captain - rechecked on a long cadence not a wedge; confirm the decision is still open' \
-    'decision held, awaiting captain, age @AGE@s' "$mtime"
+    'decision held, awaiting captain, age @AGE@s' "$h"$'\t'"$sig"
+}
+
+# The "<hash>\t<status-signature>" a decision-held absorb recorded for <window>,
+# empty when none. A marker written by an older watcher carries no TAB, so it
+# reads as a hash that can never match a real pane hash - it simply expires.
+decision_held_token() {  # <window>
+  local key
+  key=$(printf '%s' "$1" | tr ':/.' '___')
+  cat "$STATE/.decision-held-$key" 2>/dev/null || true
+}
+
+# 0 iff <window>'s decision-held marker was written by an absorb of THIS exact
+# stale hash. The subsequent-poll triage routes on this rather than on the
+# marker's mere existence: a residual marker from an absorb the pane has since
+# moved past must never hand a differently-classified pane - a crew that has
+# stopped, or one with no open decision at all whose wedge timer is running - the
+# long cadence and a disarmed wedge timer.
+decision_held_absorbed() {  # <window> <hash>
+  local tok
+  tok=$(decision_held_token "$1")
+  [ -n "$tok" ] && [ "${tok%%$'\t'*}" = "$2" ]
 }
 
 # Clear decision-held tracking for <window>. Called by handle_decision_held_stale
@@ -1174,9 +1206,9 @@ EOF
               # STALE_ESCALATE_SECS. Gated on the provably-working verdict just
               # proved above, so a crew that stopped or died with a decision still
               # open takes the surface-immediately path below exactly as before.
-              dmtime=$(status_mtime_or_now "$task")
+              dsig=$(fm_wake_signal_sig "$STATE/$task.status")
               if task_has_open_decision "$STATE" "$task"; then
-                handle_decision_held_stale "$w" "$task" "$h" "$dmtime"
+                handle_decision_held_stale "$w" "$task" "$h" "$dsig"
               else
                 printf '%s' "$h" > "$sf"
                 date +%s > "$ssf"
@@ -1189,11 +1221,11 @@ EOF
               mark_surfaced "$STATE/$(window_to_task "$w" "$STATE").status"
               wake "stale: $w"
             fi
-          elif [ -e "$STATE/.decision-held-$key" ]; then
+          elif decision_held_absorbed "$w" "$h"; then
             # This exact hash was absorbed as decision-held on a prior poll -
             # keep it on the long cadence, re-validating the decision only when
             # a new status line could have closed it (handle_decision_held_stale
-            # owns that mtime-bounded check, so no whole-file fold runs here).
+            # owns that signature-bounded check, so no whole-file fold runs here).
             handle_decision_held_stale "$w" "$task" "$h"
           elif [ -e "$ssf" ]; then
             # This exact hash was already overridden as provably-working (a
@@ -1228,9 +1260,9 @@ EOF
                 # Same decision-held trade as the terminal branch, on the same
                 # provably-working verdict: a parked crew keeps the long cadence,
                 # everything else keeps today's wedge timer untouched.
-                dmtime=$(status_mtime_or_now "$task")
+                dsig=$(fm_wake_signal_sig "$STATE/$task.status")
                 if task_has_open_decision "$STATE" "$task"; then
-                  handle_decision_held_stale "$w" "$task" "$h" "$dmtime"
+                  handle_decision_held_stale "$w" "$task" "$h" "$dsig"
                 else
                   printf '%s' "$h" > "$sf"
                   date +%s > "$ssf"
@@ -1246,10 +1278,10 @@ EOF
             esac
           else
             task=$(window_to_task "$w" "$STATE")
-            if [ -e "$STATE/.decision-held-$key" ]; then
+            if decision_held_absorbed "$w" "$h"; then
               # Absorbed as decision-held on a prior poll of this same hash -
               # stay on the long cadence and let handle_decision_held_stale run
-              # its mtime-bounded re-validate instead of the wedge timer.
+              # its signature-bounded re-validate instead of the wedge timer.
               handle_decision_held_stale "$w" "$task" "$h"
             elif [ -e "$pf" ] || status_is_paused_or_captain_held "$(last_status_line "$STATE/$task.status")"; then
               case "$(pause_state_class "$w" "$task")" in
@@ -1269,16 +1301,19 @@ EOF
         # Pane busy or not yet stably stale: reset pending escalation bookkeeping,
         # unless a genuinely busy pane has gone too long with no completed turn -
         # then route it through the same wedge timer instead of erasing it. The
-        # decision-held marker is per-absorb bookkeeping and resets with the rest;
-        # .decision-resurfaced-* is NOT - it is the long-cadence throttle, and
-        # wiping it on a churning pane would let the absorb re-surface far more
-        # often than once per PAUSE_RESURFACE_SECS. Its owner is the decision's
-        # closure (clear_decision_held_tracking), exactly as .paused-resurfaced-*
-        # is owned by clear_pause_state and likewise survives here.
+        # decision-held marker names a stale hash this pane is no longer sitting
+        # on, so it dies here whichever sub-branch runs; leaving it to the wedge
+        # sub-branch alone once let it outlive its absorb and re-route the pane.
+        # .decision-resurfaced-* is NOT reset - it is the long-cadence throttle,
+        # and wiping it on a pane that keeps churning or blinking busy would let
+        # the absorb re-surface far more often than once per PAUSE_RESURFACE_SECS.
+        # Its owner is the decision's closure (clear_decision_held_tracking),
+        # exactly as .paused-resurfaced-* is owned by clear_pause_state.
+        rm -f "$STATE/.decision-held-$key"
         if [ "$busy_now" -eq 0 ] && busy_turn_over_age "$task"; then
           wedge_timer_check "$w" "$ssf" "busy (no completed turn)" "$ewf"
         else
-          rm -f "$ssf" "$ewf" "$STATE/.decision-held-$key"
+          rm -f "$ssf" "$ewf"
         fi
         if [ -e "$pf" ] && { [ "$n" -ge 2 ] || ! status_is_paused_or_captain_held "$(last_status_line "$STATE/$(window_to_task "$w" "$STATE").status")"; }; then
           clear_pause_tracking "$w"
@@ -1287,10 +1322,11 @@ EOF
     else
       printf '%s' "$h" > "$hf"
       echo 0 > "$cf"
+      rm -f "$STATE/.decision-held-$key"
       if [ "$busy_now" -eq 0 ] && busy_turn_over_age "$task"; then
         wedge_timer_check "$w" "$ssf" "busy (no completed turn)" "$ewf"
       else
-        rm -f "$ssf" "$ewf" "$STATE/.decision-held-$key"
+        rm -f "$ssf" "$ewf"
       fi
       task=$(window_to_task "$w" "$STATE")
       if ! afk_present && status_is_paused_or_captain_held "$(last_status_line "$STATE/$task.status")" && [ "$busy_now" -ne 0 ]; then
