@@ -20,10 +20,19 @@
 #
 # --drop-local-commits is the deliberate escape hatch for the case where losing
 # them IS the intent. It is never the default and never silent: it refuses unless
-# the guard actually triggered, prints every dropped commit, records them in
+# the guard actually triggered, prints every dropped commit, pins the pre-reset
+# tip of the default branch under refs/fm-dropped/<id> and records them in
 # state/<id>.local-merge-drop before touching the branch, and then resets the
-# default branch to the task branch. Dropped commits stay recoverable by the full
-# SHAs in that record. Being destructive, it needs the captain's explicit word.
+# default branch to the task branch. That rescue ref is what makes the recorded
+# SHAs recoverable: after the reset the dropped commits hang off nothing else,
+# and the reflog that would otherwise hold them expires (gc.reflogExpireUnreachable,
+# 30 days by default) and is then pruned by `git gc`. A ref never expires, so the
+# commits stay in the project for as long as it does - and stay there until
+# someone releases them with `git update-ref -d refs/fm-dropped/<id>`, which is
+# the deliberate counterpart of that guarantee. The branch never moves when that
+# ref cannot be planted, including when an earlier rescue ref still holds commits
+# the new one would not. Being destructive, the whole escape hatch needs the
+# captain's explicit word.
 # Usage: fm-merge-local.sh [--drop-local-commits] <task-id>
 set -eu
 
@@ -38,7 +47,7 @@ ID=
 while [ $# -gt 0 ]; do
   case "$1" in
     --drop-local-commits) DROP_LOCAL=yes ;;
-    -h|--help) sed -n '2,28p' "$0" | sed 's/^# \{0,1\}//'; exit 0 ;;
+    -h|--help) awk 'NR>1 && !/^#/{exit} NR>1' "$0" | sed 's/^# \{0,1\}//'; exit 0 ;;
     -*) echo "error: unknown option '$1'; usage: fm-merge-local.sh [--drop-local-commits] <task-id>" >&2; exit 1 ;;
     *)
       [ -z "$ID" ] || { echo "error: unexpected argument '$1'; usage: fm-merge-local.sh [--drop-local-commits] <task-id>" >&2; exit 1; }
@@ -105,6 +114,22 @@ if [ -n "$DROPPED" ]; then
 
   before=$(git -C "$PROJ" rev-parse "$DEFAULT")
   RECORD="$STATE/$ID.local-merge-drop"
+  RESCUE_REF="refs/fm-dropped/$ID"
+
+  # Plant the rescue ref BEFORE the reset, and never move the branch without it:
+  # it is the only thing that keeps the dropped commits reachable once the reflog
+  # is pruned. Refuse to clobber an earlier rescue point the new one would not
+  # itself hold, which would strand exactly the commits it promised to keep.
+  held=$(git -C "$PROJ" rev-parse --verify --quiet "$RESCUE_REF^{commit}" || true)
+  if [ -n "$held" ] && ! git -C "$PROJ" merge-base --is-ancestor "$held" "$before"; then
+    echo "error: rescue ref $RESCUE_REF already holds $held from an earlier drop and $DEFAULT no longer contains it; overwriting it would strand those commits. Release it first (git -C $PROJ update-ref -d $RESCUE_REF) if they are truly unwanted, then re-run. $DEFAULT is untouched." >&2
+    exit 1
+  fi
+  git -C "$PROJ" update-ref "$RESCUE_REF" "$before" || {
+    echo "error: could not plant rescue ref $RESCUE_REF at $before in $PROJ; refusing to drop commits with no way back. $DEFAULT is untouched." >&2
+    exit 1
+  }
+
   {
     echo "# $(date -u '+%Y-%m-%dT%H:%M:%SZ') fm-merge-local.sh --drop-local-commits"
     echo "task=$ID"
@@ -112,12 +137,14 @@ if [ -n "$DROPPED" ]; then
     echo "default=$DEFAULT"
     echo "branch=$BRANCH"
     echo "default_before=$before"
+    echo "rescue_ref=$RESCUE_REF"
     git -C "$PROJ" log --no-decorate --format='dropped=%H %s' "$BRANCH..$DEFAULT"
   } >> "$RECORD"
 
   echo "DROPPING $(printf '%s\n' "$DROPPED" | wc -l | tr -d ' ') local-only commit(s) from $DEFAULT as explicitly authorized:"
   git -C "$PROJ" log --no-decorate --format='  %H %s' "$BRANCH..$DEFAULT"
-  echo "recorded in $RECORD (recoverable by full SHA)"
+  echo "recorded in $RECORD; rescue ref $RESCUE_REF now holds $DEFAULT's pre-reset tip, so those commits stay in $PROJ (not just in the reflog) and stay recoverable by full SHA"
+  echo "release them for good with: git -C $PROJ update-ref -d $RESCUE_REF"
 
   git -C "$PROJ" reset --hard "$BRANCH" >/dev/null
   after=$(git -C "$PROJ" rev-parse --short "$DEFAULT")

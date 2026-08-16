@@ -4,8 +4,9 @@
 # A task branch is always cut from origin's default-branch tip, so on a project
 # whose local default branch carries commits origin does not have, landing that
 # branch naively erases them. These tests drive the real script and prove the
-# nominal landing still fast-forwards, the trap is refused by name, and the
-# explicit escape hatch is the only way through.
+# nominal landing still fast-forwards, the trap is refused by name, the explicit
+# escape hatch is the only way through, and what it drops stays recoverable for
+# as long as its rescue ref lives.
 set -u
 
 # shellcheck source=tests/lib.sh
@@ -62,7 +63,7 @@ EOF
 }
 
 run_merge() {
-  FM_HOME="$HOME_DIR" FM_STATE_OVERRIDE="$HOME_DIR/state" FM_SPAWN_NO_GUARD=1 \
+  FM_HOME="$HOME_DIR" FM_STATE_OVERRIDE="$HOME_DIR/state" \
     "$MERGE" "$@" 2>&1
 }
 
@@ -168,10 +169,77 @@ test_escape_hatch_is_a_noop_on_a_clean_landing() {
   pass "the escape hatch never turns a clean landing into a reset"
 }
 
+test_dropped_commits_outlive_an_aggressive_gc() {
+  local rec id out status dropped_sha rescue
+  id='merge-local-rescue-r6'
+  rec=$(make_case rescue "$id")
+  read_case_record "$rec"
+  dropped_sha=$(git -C "$PROJECT_DIR" rev-parse main)
+
+  out=$(run_merge --drop-local-commits "$id")
+  status=$?
+  expect_code 0 "$status" "the explicit escape hatch should land: $out"
+  assert_contains "$out" "refs/fm-dropped/$id" "the escape hatch did not name the rescue ref that keeps the drop recoverable"
+  assert_contains "$out" "update-ref -d refs/fm-dropped/$id" "the escape hatch did not say how to release the rescue ref"
+  assert_grep "rescue_ref=refs/fm-dropped/$id" "$HOME_DIR/state/$id.local-merge-drop" \
+    "the trace record does not name the rescue ref that holds the dropped commits"
+  rescue=$(git -C "$PROJECT_DIR" rev-parse --verify --quiet "refs/fm-dropped/$id" || true)
+  [ "$rescue" = "$dropped_sha" ] \
+    || fail "rescue ref holds '$rescue', expected the pre-reset tip $dropped_sha"
+
+  # The reflog is exactly what the record used to depend on; prune it away.
+  git -C "$PROJECT_DIR" reflog expire --expire=now --expire-unreachable=now --all >/dev/null 2>&1
+  git -C "$PROJECT_DIR" gc --prune=now --quiet >/dev/null 2>&1 || fail "gc failed in the test project"
+  git -C "$PROJECT_DIR" cat-file -e "$dropped_sha^{commit}" 2>/dev/null \
+    || fail "the dropped commit died with the reflog, so the recorded SHA is dead"
+  assert_contains "$(git -C "$PROJECT_DIR" log -1 --format='%s' "$dropped_sha")" \
+    'adopt upstream PR #1234 locally' "the rescued commit is no longer readable after gc"
+
+  # And the documented release really releases: the ref is the only thing holding them.
+  git -C "$PROJECT_DIR" update-ref -d "refs/fm-dropped/$id"
+  git -C "$PROJECT_DIR" reflog expire --expire=now --expire-unreachable=now --all >/dev/null 2>&1
+  git -C "$PROJECT_DIR" gc --prune=now --quiet >/dev/null 2>&1 || fail "gc failed after releasing the rescue ref"
+  if git -C "$PROJECT_DIR" cat-file -e "$dropped_sha^{commit}" 2>/dev/null; then
+    fail "the dropped commit survived the documented release, so the rescue ref is not what was holding it"
+  fi
+  pass "dropped commits are held by a rescue ref that outlives the reflog, and the documented release frees them"
+}
+
+test_a_second_drop_never_strands_an_earlier_rescue() {
+  local rec id out status first_sha before
+  id='merge-local-rescue-twice-r7'
+  rec=$(make_case rescue-twice "$id")
+  read_case_record "$rec"
+  first_sha=$(git -C "$PROJECT_DIR" rev-parse main)
+
+  out=$(run_merge --drop-local-commits "$id")
+  status=$?
+  expect_code 0 "$status" "the first authorized drop should land: $out"
+
+  # A later local-only commit makes the same task droppable again; the second
+  # drop must not silently reuse the rescue ref and strand the first drop.
+  printf 'a second local adoption\n' > "$PROJECT_DIR/adoption-2.txt"
+  git_c "$PROJECT_DIR" add adoption-2.txt
+  git_c "$PROJECT_DIR" commit -qm 'adopt upstream PR #5678 locally'
+  before=$(git -C "$PROJECT_DIR" rev-parse main)
+
+  out=$(run_merge --drop-local-commits "$id")
+  status=$?
+  [ "$status" -ne 0 ] || fail "a second drop overwrote the rescue ref instead of refusing"
+  assert_contains "$out" "refs/fm-dropped/$id" "the refusal did not name the rescue ref it declined to overwrite"
+  assert_contains "$out" "update-ref -d refs/fm-dropped/$id" "the refusal did not say how to release the earlier rescue"
+  [ "$(git -C "$PROJECT_DIR" rev-parse main)" = "$before" ] || fail "the refused second drop still moved main"
+  [ "$(git -C "$PROJECT_DIR" rev-parse --verify --quiet "refs/fm-dropped/$id")" = "$first_sha" ] \
+    || fail "the refused second drop still moved the rescue ref off the first drop's commits"
+  pass "a second drop refuses rather than stranding the commits an earlier rescue ref holds"
+}
+
 test_clean_landing_fast_forwards
 test_landing_that_drops_a_local_commit_is_refused
 test_reconciled_branch_lands_cleanly
 test_escape_hatch_drops_explicitly_and_traceably
 test_escape_hatch_is_a_noop_on_a_clean_landing
+test_dropped_commits_outlive_an_aggressive_gc
+test_a_second_drop_never_strands_an_earlier_rescue
 
 echo "# all fm-merge-local tests passed"
