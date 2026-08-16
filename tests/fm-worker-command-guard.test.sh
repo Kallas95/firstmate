@@ -118,6 +118,14 @@ matrix_case D61 deny dotenv-access 'grep TODO .env'
 matrix_case D62 deny dotenv-access 'rg --file .env src/'
 matrix_case D63 deny dotenv-access 'sed -n 1p .env'
 matrix_case D64 deny dotenv-access 'awk "{print}" .env'
+# The timing keyword carries its own options, and the command behind them runs
+# just as surely as behind the bare keyword - in a compound body too.
+matrix_case D65 deny permission-change 'time -p chmod +x a'
+matrix_case D66 deny permission-change 'time --portability chmod +x a'
+matrix_case D67 deny dotenv-access 'time -p cat .env'
+matrix_case D68 deny protected-branch-push 'time -p git push origin main'
+matrix_case D69 deny permission-change 'for f in a; do time -p chmod +x $f; done'
+matrix_case D70 deny dotenv-access 'if true; then time -p cat .env; fi'
 
 # ALLOW: ordinary worker work, including the push form the delivery path needs.
 matrix_case A01 allow - 'git push origin HEAD'
@@ -173,6 +181,9 @@ matrix_case A37 allow - 'sed -n "/\.env/p" README.md'
 # subcommand, which keeps going through the git branch.
 matrix_case A38 allow - 'diff config/x-mode.env config/x-mode.env.example'
 matrix_case A39 allow - 'git diff --stat'
+# Dropping the keyword's options must not start refusing ordinary timed work.
+matrix_case A40 allow - 'time -p npm test'
+matrix_case A41 allow - 'for f in *.md; do time -p wc -l $f; done'
 
 MATRIX_TMP=$(mktemp -d "${TMPDIR:-/tmp}/fm-worker-guard-matrix.XXXXXX")
 FM_TEST_CLEANUP_DIRS+=("$MATRIX_TMP")

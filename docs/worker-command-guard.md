@@ -5,8 +5,6 @@ Nothing stands between the model and the host, so a command that reaches past th
 This guard refuses that class of tool call before it runs, on the worker harnesses it is wired into: `claude`, `pi`, and `pi-signed`.
 A crewmate or scout on any other harness has no command perimeter, so `fm-spawn.sh` says so loudly at launch rather than letting the gap pass for protection.
 
-It is a seatbelt against an agent that wanders, not a sandbox against an adversary: a worker that genuinely needs one of these actions asks firstmate instead of routing around the refusal.
-
 ## One perimeter, two application points
 
 [`bin/fm-worker-command-policy.mjs`](../bin/fm-worker-command-policy.mjs) is the single owner of the perimeter and of every deny/allow decision.
@@ -40,9 +38,42 @@ Stated here for readers; the policy owner's rule tables are authoritative.
 `.env` is matched on the exact basename rather than on "contains env", because firstmate itself tracks ordinary files such as `config/x-mode.env` that a worker legitimately reads.
 The rule covers exposing a secret, not creating a file, so a `.env` DESTINATION is untouched: `cp .env.example .env` and a write or edit tool creating one are ordinary bootstrap work, while `cp .env /tmp/x` and `mv .env /tmp/x` carry the secret out and are refused.
 
+## Threat model
+
+This guard protects against a worker that WANDERS.
+It does not protect against a worker that is deliberately trying to get past it.
+Anyone who mistakes it for a fence will take risks it does not cover, so the gaps below are listed as plainly as the guarantees.
+A worker that genuinely needs one of these actions asks firstmate; a worker set on routing around the refusal has ways to do it, and closing those would take a sandbox rather than a classifier.
+
+## What the guard holds
+
+Within the perimeter above, a command is classified wherever the shared lexer can see it:
+
+- a direct command, and each stage of a pipeline or a list;
+- the body of a subshell or a brace group;
+- a command substitution, a backtick, or a process substitution;
+- the body of a compound statement - a `for`, `while`, `until` or `if` body, and a command behind `time`, with or without the keyword's own options;
+- a payload carried in another tool's arguments - `find -exec`, `-execdir`, `-ok`, `-okdir`, and `xargs`;
+- an inline shell payload (`sh -c`), an `eval` payload, and a wrapper payload such as `env -S`;
+- a file loaded through the sourcing builtins.
+
 ## Deliberate boundaries
 
-**The submitted command, not the scripts it runs.**
+Three classes are outside what this guard classifies.
+Each is a real gap, verified against the policy owner, not a theoretical one.
+
+**Command runners the shared classifier does not model.**
+The perimeter applies to the command [`bin/fm-arm-command-policy.mjs`](../bin/fm-arm-command-policy.mjs) resolves, and its wrapper set is closed: `exec`, `command`, `sudo`, `nohup`, `env`, `timeout`, `gtimeout`.
+Any other launcher swallows the command behind it, so `nice chmod +x a`, `nice -n 10 chmod +x a`, `stdbuf -o0 chmod +x a` and `setsid chmod +x a` are allowed today, while `nohup chmod +x a` and `timeout 5 chmod +x a` are refused.
+Extending that set is deliberately not done here: it is shared with the arm guard and the cd guard, whose behaviour is outside this change's scope.
+
+**Paths produced at runtime.**
+The policy reads literal operands, so a path the command only receives while running is invisible to it.
+`find . -name .env -exec cat {} \;` and `find . -name .env | xargs cat` are allowed, because `.env` is a filter pattern there and `{}` is a placeholder - no operand names the file - while `cat .env` is refused.
+Refusing on the mere presence of the text would be worse: it would refuse `find . -name .env`, an ordinary search, and contradict the principle stated below that the guard never blocks work it has no opinion about.
+This is the same limit as a filename held in a variable, which no static classifier can close.
+
+**The bodies of scripts a submitted command would run.**
 The policy classifies the command a worker submits.
 It does not open and re-classify the body of a script that command would run: doing so blocks this repo's own test suite, which legitimately changes fixture modes, and every project's build scripts.
 
@@ -59,13 +90,14 @@ This guard is a perimeter around an unattended worker, so the trade runs the oth
 A secondmate is a firstmate instance with its own supervised posture, not an unattended worker, so `fm-spawn.sh` does not wire the guard for a `--secondmate` spawn.
 
 **Not the primary's own session.**
-The guard is wired per task. Firstmate's own primary session is the captain's supervised session and keeps whatever perimeter the captain configures for it.
+The guard is wired per task.
+Firstmate's own primary session is the captain's supervised session and keeps whatever perimeter the captain configures for it.
 
 ## Verification
 
 `tests/fm-worker-command-guard.test.sh` is the regression owner:
 
-- the full deny/allow matrix across the Claude, Codex, Grok, Pi, and OpenCode entry forms, including the `git push origin HEAD` case the delivery path needs;
+- the full deny/allow matrix across the Claude, Codex, Grok, Pi, and OpenCode entry forms, covering every form listed under What the guard holds, and including the `git push origin HEAD` case the delivery path needs;
 - the file-tool path perimeter in both payload shapes, read and write alike;
 - every fail-closed path, including each application point losing its transport after launch;
 - a real `fm-spawn.sh` run driving the generated Pi extension in a plain Node host, and the recorded Claude hook command fed a real payload;

@@ -268,11 +268,18 @@ function redirectionReadsDotenv(tokens) {
 // never reach the body, so the keywords are dropped and the remainder is
 // classified exactly like the same command written on its own. `!` leads the
 // same way, negating the command that follows it rather than being one.
+//
+// A keyword can carry its own options - `time -p chmod +x a` - and neither a
+// compound body nor a timing keyword can legitimately begin with one, so once a
+// keyword has been dropped the options that follow it are dropped too.
 function withoutLeadingKeywords(tokens) {
   let start = 0;
+  let dropped = false;
   while (tokens[start]?.type === "word") {
     const value = tokens[start].value;
-    if (value !== "!" && !SHELL_RESERVED_WORDS.has(basename(value))) break;
+    const keyword = value === "!" || SHELL_RESERVED_WORDS.has(basename(value));
+    if (!keyword && !(dropped && isOption(value))) break;
+    dropped = true;
     start += 1;
   }
   return start === 0 ? tokens : tokens.slice(start);
@@ -367,7 +374,8 @@ function classifyNode(node, depth) {
   }
   if (redirectionReadsDotenv(node)) return deny("dotenv-access");
 
-  const position = commandPosition(withoutLeadingKeywords(node));
+  const body = withoutLeadingKeywords(node);
+  const position = commandPosition(body);
 
   // A nested program runs whatever it contains, so every place the shared
   // lexer parks one is classified against the same perimeter: subshells and
@@ -394,10 +402,13 @@ function classifyNode(node, depth) {
 
   if (position.wrappers.includes("sudo")) return deny("privilege-escalation");
   if (!position.command) {
-    // A wrapper option the shared classifier could not resolve can hide the
-    // real command position, so a node that mentions the perimeter and
-    // resolves to no command is refused rather than skipped.
-    if (position.unresolvedWrapperOption && position.words.some((word) => PERIMETER_MARKERS.test(word.value))) {
+    // A wrapper option the shared classifier could not resolve, or a keyword
+    // whose body reduced to nothing, can hide the real command position, so a
+    // node that mentions the perimeter and resolves to no command is refused
+    // rather than skipped. The whole node is searched, not the stripped body,
+    // because the marker may sit in what was dropped.
+    const unresolved = position.unresolvedWrapperOption || body !== node;
+    if (unresolved && node.some((token) => token.type === "word" && PERIMETER_MARKERS.test(token.value))) {
       return deny("unclassifiable-perimeter-command");
     }
     return ALLOW;
