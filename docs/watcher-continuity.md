@@ -39,10 +39,14 @@ Standing down on the flag alone therefore produces the one state no home may rea
 
 Liveness is proven by the same recorded process identity the lock already carries, so a reused pid never passes as the daemon.
 `bin/fm-afk-launch.sh status` exposes the state to callers that cannot source bash, and takes no lock so a concurrent launch never delays the answer.
+`bin/fm-afk-launch.sh down-notice <cover>` exposes the alarm sentence itself the same way, so the JavaScript plugin and the TypeScript extension print the one wording `fm_afk_daemon_down_notice` owns rather than each keeping a copy that drifts.
+`<cover>` names the mechanism supervising in place of the dead daemon, the only part that differs per harness.
 
 In `armed-no-daemon`, supervision is restored by the ordinary mechanism - the whole ordinary mechanism, including the watcher's own triage.
 A re-armed watcher that still one-shot every benign signal, every distinct stale hash, and every heartbeat would hand them to a daemon that is not there to absorb them, and each handoff costs a model turn; the ordinary triage absorbs them exactly as it does outside away mode.
-The failure is named where the session will see it: the Stop auto-arm's rewake and failure banners, the Cursor park's wake follow-up, the turn-end guard's block reason (which the Cursor park's repair follow-up carries), the pull guard's banner, and the session-start digest and supervision block.
+The failure is named where the session will see it, and every adapter that re-arms by itself names it on its own wake surface: the Stop auto-arm's rewake and failure banners, the Cursor park's wake follow-up, the OpenCode plugin's wake prompt, and the Pi extension's wake follow-up.
+Those four carry it because arming is what keeps the watcher healthy, and a healthy watcher silences both the turn-end guard and the pull guard - so without it the state would wait for the next session start.
+It is also named by the turn-end guard's block reason (which the Cursor park's repair follow-up carries), the pull guard's banner, and the session-start digest and supervision block.
 The repair line diagnoses that state and then gives the harness's own repair instruction unchanged, because only claude, cursor, pi, and opencode re-arm by themselves: telling codex or grok that supervision "stays armed" would withhold the checkpoint or tracked background task that actually restores it.
 No mechanism ever clears `state/.afk`: leaving away mode is the captain's decision, and a home that silently dropped it would start injecting per-wake instead of batching.
 A home in `armed-no-daemon` with nothing in flight raises nothing, because supervision need is unchanged by this contract - the alarm appears with the first real supervision need, and at the next session start.
@@ -109,8 +113,9 @@ The same suite covers ordinary same-process session replacement for `/new`, `/re
 `tests/fm-subagent-pretool-check.test.sh` proves Claude retains only the non-status Bash seatbelts.
 `tests/fm-claude-stop-autoarm.test.sh` covers the auto-arm's scope, stale and live session owners, unchanged need boundaries, single-flight, bounded failure retries, benign live-watcher cycle ends, one-notice failure episodes, and exit-2 translation.
 It covers both away-mode states with the same flag on disk: a live daemon keeps the hook inert, while a flag with no daemon arms and names the broken away mode in its banner.
-`tests/fm-afk-launch.test.sh` covers the state vocabulary itself, including a live pid whose identity does not match, and proves a harness-native entry never reads as supervision before its daemon lands.
+`tests/fm-afk-launch.test.sh` covers the state vocabulary itself, including a live pid whose identity does not match, proves a harness-native entry never reads as supervision before its daemon lands, and covers the shared alarm sentence speaking in `armed-no-daemon` only.
 `tests/fm-cursor-primary.test.sh`, `tests/fm-pi-watch-extension.test.sh`, and `tests/fm-session-start.test.sh` cover the same two states for the Cursor park, the OpenCode plugin, and the session-start digest.
+`tests/fm-pi-watch-extension.test.sh` also drives both adapters against the real launcher and asserts that their delivered wake names the broken away mode when the daemon is gone and says nothing about away mode otherwise.
 `tests/fm-watch-triage.test.sh` covers the watcher's own half of the stand-down over a real watcher process: with a live daemon a benign signal and a first-sighting declared pause are handed off one-shot, and with the same flag and no daemon the benign signal, the no-change heartbeat, and that pause all go back through the ordinary triage.
 `tests/fm-supervision-instructions.test.sh` covers the `armed-no-daemon` repair line naming the broken away mode while still rendering the harness procedure and its queue-pending and x-mode prefixes, including for the harnesses that have no automatic re-arm.
 `FM_CLAUDE_LIVE_E2E=1 tests/fm-claude-stop-autoarm-live-e2e.test.sh` starts with the reproduced stale-lock state, runs session start first, completes two tokenless cycles, and checks the competing-live-owner negative control.

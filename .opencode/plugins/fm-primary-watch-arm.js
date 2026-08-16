@@ -116,6 +116,22 @@ async function afkDaemonOwnsSupervision(paths) {
   return result.stdout.trim() === "daemon";
 }
 
+// Naming the broken away mode on the wake surface, because this plugin arming
+// the cycle is exactly what keeps the watcher healthy - so fm-guard.sh and the
+// turn-end guard never print their banners, and nothing else would report it
+// before the next session start. The sentence has one owner in
+// bin/fm-wake-lib.sh, reached here through the same read-only launcher entry
+// point the state query uses; the flag test short-circuits the spawn outside
+// away mode, and an unreadable answer stays silent rather than inventing one.
+async function awayModeDownNotice(paths) {
+  if (!existsSync(`${paths.state}/.afk`)) return "";
+  const result = await runProcess(`${paths.root}/bin/fm-afk-launch.sh`, ["down-notice", "this plugin-owned watcher cycle"], {
+    env: { ...process.env, FM_HOME: paths.home, FM_STATE_OVERRIDE: paths.state },
+  });
+  if (result.code !== 0) return "";
+  return result.stdout.trim();
+}
+
 async function shouldArm(paths) {
   if (await afkDaemonOwnsSupervision(paths)) return false;
   if (existsSync(`${paths.config}/x-mode.env`)) return true;
@@ -220,13 +236,16 @@ async function sendPrompt(paths, client, sessionID, text, recovery) {
   }
 }
 
-function wakePrompt(reason) {
-  return `WATCHER FIRED - drain queued wakes with bin/fm-wake-drain.sh and handle the reported wake. Watcher continuity is plugin-owned.\n\n${reason}`;
+function wakePrompt(reason, notice = "") {
+  const tail = notice ? `\n\n${notice}` : "";
+  return `WATCHER FIRED - drain queued wakes with bin/fm-wake-drain.sh and handle the reported wake. Watcher continuity is plugin-owned.\n\n${reason}${tail}`;
 }
 
 function surfaceFailure(paths, client, sessionID, reason) {
-  void sendPrompt(paths, client, sessionID, wakePrompt(reason)).catch(() => {
-  });
+  void awayModeDownNotice(paths)
+    .then((notice) => sendPrompt(paths, client, sessionID, wakePrompt(reason, notice)))
+    .catch(() => {
+    });
 }
 
 function retryDelay(attempt) {
@@ -375,10 +394,11 @@ function spawnArm(paths, sessionID, client, predecessorArmPid = "") {
         ? previousRestoration.catch(() => "").then(() => restoreAfterActionableClose(paths, sessionID, client, predecessor))
         : restoreAfterActionableClose(paths, sessionID, client, predecessor);
       restorationInFlight = restoration;
-      void restoration.then((result) => {
+      void restoration.then(async (result) => {
         if (restorationInFlight === restoration) restorationInFlight = null;
         const message = result.failure ? `${classification.message}\n\n${result.failure}` : classification.message;
-        return sendPrompt(paths, client, sessionID, wakePrompt(message), result.recovery);
+        const notice = await awayModeDownNotice(paths);
+        return sendPrompt(paths, client, sessionID, wakePrompt(message, notice), result.recovery);
       }).catch(() => {
       });
       return;

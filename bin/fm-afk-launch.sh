@@ -43,7 +43,18 @@
 #                              is actually supervising, so this is what a native
 #                              background launch must confirm before it can be
 #                              called done, and what a non-bash caller (the
-#                              OpenCode plugin) reads instead of testing the flag.
+#                              OpenCode plugin, the Pi extension) reads instead of
+#                              testing the flag.
+#   fm-afk-launch.sh down-notice <cover>
+#                              Print the one shared sentence that names an away
+#                              mode flagged with no daemon behind it, and print
+#                              nothing in any other state. <cover> names the
+#                              mechanism supervising in its place, the only part
+#                              that differs per harness. Read only: takes no lock
+#                              and changes nothing. bin/fm-wake-lib.sh owns that
+#                              sentence for every bash turn-end hook; this is the
+#                              same owner reached by a caller that cannot source
+#                              bash, so the four adapters never drift apart.
 #
 # Supported backends: herdr, tmux. Others (zellij, orca, cmux) have no verified
 # non-visible-launch primitive here yet and refuse loudly.
@@ -587,6 +598,15 @@ fm_afk_launch_status() {
   fm_afk_supervision_state "$FM_AFK_LAUNCH_STATE"
 }
 
+fm_afk_launch_down_notice() {  # <what-covers-this-home>
+  local cover=${1-}
+  if [ -z "$cover" ]; then
+    fm_afk_launch_log "down-notice needs the name of the mechanism covering this home"
+    return 2
+  fi
+  fm_afk_daemon_down_notice "$FM_AFK_LAUNCH_STATE" "$cover"
+}
+
 fm_afk_launch_stop() {
   local pid pid_identity current_identity result=0 read_result
   fm_afk_launch_record_read
@@ -650,6 +670,7 @@ fm_afk_launch_main() {
   # a lock this process owns, so arming it before acquisition is safe.
   case "${1:-start}" in
     status) fm_afk_launch_status; return 0 ;;
+    down-notice) fm_afk_launch_down_notice "${2-}"; return $? ;;
   esac
   trap fm_afk_launch_lock_release EXIT
   trap 'exit 130' INT

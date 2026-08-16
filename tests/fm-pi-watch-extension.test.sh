@@ -137,6 +137,82 @@ EOF
   pass "Pi extension reports external healthy watcher output"
 }
 
+# The extension's wake is the same only-surface case as the OpenCode plugin's: an
+# armed cycle keeps the watcher healthy, so no guard banner fires and a broken
+# away mode would otherwise wait for the next session start. A live daemon leaves
+# the wake exactly as it was.
+pi_wake_notice_case() {  # <name> <away-state live|dead> <expect-notice 0|1>
+  local name=$1 away=$2 expect_notice=$3 repo home plugin out status
+  repo="$TMP_ROOT/pi-notice-$name-root"
+  home="$TMP_ROOT/pi-notice-$name-home"
+  mkdir -p "$repo/bin" "$home/state" "$home/config"
+  install_pi_watch_extension_fixture "$repo"
+  install_real_afk_launcher_shim "$repo"
+  plugin="$repo/.pi/extensions/fm-primary-pi-watch.ts"
+  if [ "$away" = live ]; then
+    fm_fake_afk_daemon "$home/state" >/dev/null
+  else
+    fm_fake_afk_flagged_no_daemon "$home/state"
+  fi
+  cat > "$repo/bin/fm-watch-arm.sh" <<'SH'
+#!/usr/bin/env bash
+printf 'watcher: healthy pid=1 (beacon 0s)\n'
+SH
+  chmod +x "$repo/bin/fm-watch-arm.sh"
+  out=$(PLUGIN="$plugin" FM_HOME="$home" FM_ROOT_OVERRIDE="$repo" FM_WATCH_REARM_RETRY_BASE_MS=5 FM_WATCH_REARM_RETRY_MAX_MS=10 FM_WATCH_REARM_RETRY_LIMIT=2 node --input-type=module 2>&1 <<'EOF'
+import { writeFileSync } from "node:fs";
+import { pathToFileURL } from "node:url";
+
+let handler = null;
+let prompt = "";
+const pi = {
+  on() {},
+  registerCommand(name, options) {
+    if (name === "fm-watch-arm-pi") handler = options.handler;
+  },
+  registerTool() {},
+  sendUserMessage: async (message) => {
+    prompt = message;
+  },
+};
+writeFileSync(`${process.env.FM_HOME}/state/.lock`, `${process.pid}\n`);
+const mod = await import(pathToFileURL(process.env.PLUGIN).href);
+mod.default(pi);
+if (!handler) {
+  console.error("Pi watch command was not registered");
+  process.exit(1);
+}
+await handler("", { ui: { notify() {} } });
+for (let i = 0; i < 500 && !prompt; i += 1) {
+  await new Promise((resolve) => setTimeout(resolve, 20));
+}
+if (!prompt.includes("FIRSTMATE WATCHER WAKE")) {
+  console.error(`missing follow-up prompt: ${prompt}`);
+  process.exit(1);
+}
+console.log(JSON.stringify(prompt));
+EOF
+)
+  status=$?
+  expect_code 0 "$status" "Pi away-notice case '$name' failed to run: $out"
+  if [ "$expect_notice" -eq 1 ]; then
+    assert_contains "$out" "AWAY MODE IS FLAGGED BUT ITS DAEMON IS NOT RUNNING" \
+      "the Pi wake did not name the away mode that stopped supervising"
+    assert_contains "$out" "this extension-owned watcher cycle" \
+      "the Pi wake did not name the extension as the cover that took over"
+  else
+    assert_not_contains "$out" "AWAY MODE IS FLAGGED" \
+      "a live away daemon made the Pi wake claim away mode was broken"
+  fi
+  assert_present "$home/state/.afk" "the extension must never clear the captain's away-mode flag"
+}
+
+test_pi_wake_names_a_broken_away_mode() {
+  pi_wake_notice_case live live 0
+  pi_wake_notice_case dead dead 1
+  pass "Pi watcher wake names an away mode flagged with no daemon, and stays quiet under a live one"
+}
+
 test_pi_tool_returns_agent_tool_result() {
   local repo home plugin out status
   repo="$TMP_ROOT/pi-tool-result-root"
@@ -1209,6 +1285,19 @@ EOF
   pass "OpenCode plugins have an explicit ESM boundary even under a typeless parent package"
 }
 
+# Route an adapter fixture's launcher calls at the real bin/fm-afk-launch.sh, so
+# the away-mode state and its alarm sentence come from their single owner instead
+# of a stand-in that could agree with a wrong adapter.
+install_real_afk_launcher_shim() {  # <repo>
+  local repo=$1
+  mkdir -p "$repo/bin"
+  cat > "$repo/bin/fm-afk-launch.sh" <<SH
+#!/usr/bin/env bash
+exec "$ROOT/bin/fm-afk-launch.sh" "\$@"
+SH
+  chmod +x "$repo/bin/fm-afk-launch.sh"
+}
+
 # Away mode transfers watcher ownership to its daemon, so this plugin stands
 # down for it. It must stand down for a LIVE daemon only: the flag alone is a
 # declaration the host cannot invalidate when it kills the daemon, and standing
@@ -1271,6 +1360,80 @@ test_opencode_plugin_stands_down_only_for_a_live_away_daemon() {
   opencode_afk_stand_down_case live daemon 0
   opencode_afk_stand_down_case dead armed-no-daemon 1
   pass "OpenCode watcher plugin stands down for a live away daemon and stays armed without one"
+}
+
+# Arming keeps the watcher healthy, which is exactly why nothing else reports a
+# broken away mode on this path: fm-guard.sh and the turn-end guard both stay
+# quiet for a healthy watcher, so the wake this plugin delivers is the only
+# surface between the daemon's death and the next session start.
+opencode_wake_notice_case() {  # <name> <away-state off|dead> <expect-notice 0|1>
+  local name=$1 away=$2 expect_notice=$3 plugin repo home log out status
+  plugin="$ROOT/.opencode/plugins/fm-primary-watch-arm.js"
+  repo="$TMP_ROOT/opencode-notice-$name-root"
+  home="$TMP_ROOT/opencode-notice-$name-home"
+  log="$TMP_ROOT/opencode-notice-$name.log"
+  mkdir -p "$repo/bin" "$home/state" "$home/config"
+  git init -q "$repo"
+  : > "$repo/AGENTS.md"
+  : > "$home/state/task.meta"
+  [ "$away" = off ] || fm_fake_afk_flagged_no_daemon "$home/state"
+  install_real_afk_launcher_shim "$repo"
+  cat > "$repo/bin/fm-watch-arm.sh" <<'SH'
+#!/usr/bin/env bash
+printf 'arm=%s\n' "$$" >> "${FM_ARM_LOG:?}"
+printf 'watcher: healthy pid=1 (beacon 0s)\n'
+SH
+  chmod +x "$repo/bin/fm-watch-arm.sh"
+  out=$(PLUGIN="$plugin" WORKTREE="$repo" FM_HOME="$home" FM_ARM_LOG="$log" \
+    FM_WATCH_REARM_RETRY_BASE_MS=5 FM_WATCH_REARM_RETRY_MAX_MS=10 FM_WATCH_REARM_RETRY_LIMIT=2 node 2>&1 <<'EOF'
+import { writeFileSync } from "node:fs";
+import { pathToFileURL } from "node:url";
+
+const mod = await import(pathToFileURL(process.env.PLUGIN).href);
+const prompts = [];
+const client = {
+  session: {
+    promptAsync: async (request) => {
+      prompts.push(request.body.parts[0].text);
+    },
+  },
+};
+const hooks = await mod.FmPrimaryWatchArm({
+  client,
+  directory: process.env.WORKTREE,
+  worktree: process.env.WORKTREE,
+});
+writeFileSync(`${process.env.FM_HOME}/state/.lock`, `${process.pid}\n`);
+await hooks.event({ event: { type: "session.idle", properties: { sessionID: "session-test" } } });
+for (let i = 0; i < 500 && !prompts.some((message) => message.includes("WATCHER FIRED")); i += 1) {
+  await new Promise((resolve) => setTimeout(resolve, 10));
+}
+const wake = prompts.find((message) => message.includes("WATCHER FIRED"));
+if (!wake) {
+  console.error(`no wake was delivered: ${prompts.join(" | ")}`);
+  process.exit(1);
+}
+console.log(JSON.stringify(wake));
+EOF
+)
+  status=$?
+  expect_code 0 "$status" "OpenCode away-notice case '$name' failed to run: $out"
+  if [ "$expect_notice" -eq 1 ]; then
+    assert_contains "$out" "AWAY MODE IS FLAGGED BUT ITS DAEMON IS NOT RUNNING" \
+      "the OpenCode wake did not name the away mode that stopped supervising"
+    assert_contains "$out" "this plugin-owned watcher cycle" \
+      "the OpenCode wake did not name the plugin as the cover that took over"
+    assert_present "$home/state/.afk" "the plugin must never clear the captain's away-mode flag"
+  else
+    assert_not_contains "$out" "AWAY MODE IS FLAGGED" \
+      "a home with no away mode was told its away mode is broken"
+  fi
+}
+
+test_opencode_wake_names_a_broken_away_mode() {
+  opencode_wake_notice_case no-away off 0
+  opencode_wake_notice_case dead-daemon dead 1
+  pass "OpenCode watcher wake names an away mode flagged with no daemon, and stays quiet otherwise"
 }
 
 test_opencode_primary_watch_plugin_uses_effective_state_home() {
@@ -2215,6 +2378,7 @@ EOF
 }
 
 test_pi_extension_reports_external_healthy_watcher
+test_pi_wake_names_a_broken_away_mode
 test_pi_tool_returns_agent_tool_result
 test_pi_redundant_tool_call_is_owned_noop
 test_pi_scheduled_retry_call_is_owned_noop
@@ -2245,3 +2409,4 @@ test_opencode_actionable_close_rechecks_session_lock
 test_opencode_watch_arm_coordinates_with_turnend_guard
 test_opencode_healthy_arm_output_does_not_suppress_guard
 test_opencode_plugin_stands_down_only_for_a_live_away_daemon
+test_opencode_wake_names_a_broken_away_mode

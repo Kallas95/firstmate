@@ -540,6 +540,63 @@ unit_afk_supervision_state() {
   rm -rf "$st"
 }
 
+# The down-notice subcommand is the away-mode alarm sentence itself, reached by
+# the two adapters that cannot source bash. It must speak in exactly the state
+# where nothing is supervising, and stay silent in the other two so a covered
+# home is never told its away mode is broken.
+unit_down_notice_speaks_only_for_a_flagged_dead_daemon() {
+  local st lock pid out status
+  st=$(mktemp -d "${TMPDIR:-/tmp}/fm-afk-notice.XXXXXX")
+  mkdir -p "$st/state"
+
+  out=$(FM_HOME="$st" FM_STATE_OVERRIDE="$st/state" "$LAUNCH" down-notice 'the test cover' 2>/dev/null)
+  if [ -z "$out" ]; then
+    pass "down-notice: a home that never entered away mode is told nothing"
+  else
+    fail "down-notice: spoke with no away-mode flag: $out"
+  fi
+
+  date '+%s' > "$st/state/.afk"
+  sleep 600 &
+  pid=$!
+  lock="$st/state/.supervise-daemon.lock"
+  mkdir -p "$lock"
+  printf '%s\n' "$pid" > "$lock/pid"
+  FM_STATE_OVERRIDE="$st/state" bash -c '. "$1"; fm_pid_identity "$2"' _ \
+    "$ROOT/bin/fm-wake-lib.sh" "$pid" > "$lock/pid-identity" 2>/dev/null || true
+  out=$(FM_HOME="$st" FM_STATE_OVERRIDE="$st/state" "$LAUNCH" down-notice 'the test cover' 2>/dev/null)
+  if [ -z "$out" ]; then
+    pass "down-notice: a live away daemon raises no alarm"
+  else
+    fail "down-notice: alarmed while a live away daemon owned the home: $out"
+  fi
+
+  # Same flag, same lock, dead pid: only liveness separates this from the case above.
+  kill "$pid" 2>/dev/null || true
+  wait "$pid" 2>/dev/null || true
+  out=$(FM_HOME="$st" FM_STATE_OVERRIDE="$st/state" "$LAUNCH" down-notice 'the test cover' 2>/dev/null)
+  if printf '%s\n' "$out" | grep -F 'AWAY MODE IS FLAGGED BUT ITS DAEMON IS NOT RUNNING' >/dev/null \
+    && printf '%s\n' "$out" | grep -F 'the test cover is the only cover' >/dev/null; then
+    pass "down-notice: an unchanged flag over a dead daemon names the broken away mode and its cover"
+  else
+    fail "down-notice: a dead daemon under a present flag was not named: $out"
+  fi
+  if [ -e "$st/state/.afk" ]; then
+    pass "down-notice: reading the state never clears the captain's away-mode flag"
+  else
+    fail "down-notice: removed the away-mode flag"
+  fi
+
+  FM_HOME="$st" FM_STATE_OVERRIDE="$st/state" "$LAUNCH" down-notice >/dev/null 2>&1
+  status=$?
+  if [ "$status" -eq 2 ]; then
+    pass "down-notice: a missing cover fails loudly instead of emitting a half-sentence"
+  else
+    fail "down-notice: a missing cover exited $status"
+  fi
+  rm -rf "$st"
+}
+
 unit_status_needs_no_lock() {
   local st state
   st=$(mktemp -d "${TMPDIR:-/tmp}/fm-afk-status-lock.XXXXXX")
@@ -571,14 +628,14 @@ unit_help_documents_every_subcommand_untruncated() {
     rm -rf "$st"
     return
   fi
-  for sub in start start-native stop reconcile status; do
+  for sub in start start-native stop reconcile status down-notice; do
     printf '%s\n' "$out" | grep -F "fm-afk-launch.sh $sub" >/dev/null \
       || fail "help: the $sub subcommand is missing from the emitted usage"
   done
   # The last sentence of the last documented subcommand, and the trailing
   # paragraphs after it: the truncation cut exactly here.
-  printf '%s\n' "$out" | grep -F "reads instead of testing the flag." >/dev/null \
-    || fail "help: the status entry is truncated mid-sentence"
+  printf '%s\n' "$out" | grep -F "the four adapters never drift apart." >/dev/null \
+    || fail "help: the last subcommand entry is truncated mid-sentence"
   printf '%s\n' "$out" | grep -F "Supported backends:" >/dev/null \
     || fail "help: the supported-backend paragraph was cut off"
   printf '%s\n' "$out" | grep -F "Test seam:" >/dev/null \
@@ -1065,6 +1122,7 @@ unit_readiness_failure_rolls_back_terminal
 unit_readiness_failure_preserves_unconfirmed_record
 unit_tmux_absence_distinguishes_probe_failure
 unit_afk_supervision_state
+unit_down_notice_speaks_only_for_a_flagged_dead_daemon
 unit_status_needs_no_lock
 unit_help_documents_every_subcommand_untruncated
 unit_native_entry_reports_no_supervision_until_the_daemon_lands
