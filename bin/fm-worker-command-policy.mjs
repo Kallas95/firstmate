@@ -38,7 +38,7 @@ const REASONS = {
   "protected-branch-push":
     "pushing to master/main is forbidden for a firstmate worker: work lands through a PR. Push the task branch instead, for example git push origin HEAD.",
   "dotenv-access":
-    "reading or copying a .env file is forbidden for a firstmate worker: it holds live credentials. Ask firstmate if the task genuinely needs a secret.",
+    "reading a .env file, or copying one elsewhere, is forbidden for a firstmate worker: it holds live credentials. Ask firstmate if the task genuinely needs a secret.",
   "unclassifiable-perimeter-command":
     "unsupported or malformed shell syntax mentions a command inside the worker perimeter, so it cannot be classified and is refused rather than allowed.",
 };
@@ -58,16 +58,32 @@ const READING_COMMANDS = new Set([
   "nl", "tac", "bat", "sed", "awk", "grep", "egrep", "fgrep", "rg", "cut", "sort",
 ]);
 
-// Commands that copy or relocate a file. Denied on the same .env argument test.
+// Commands that copy or relocate a file. Denied when a .env is a SOURCE.
 const COPYING_COMMANDS = new Set(["cp", "mv", "install", "ln", "tee", "rsync", "scp"]);
+
+// Options that move a copy's destination out of the trailing operand, so every
+// remaining operand is a source: `cp -t /tmp .env` copies the secret out too.
+const TARGET_DIRECTORY_OPTION = /^(?:-t|--target-directory(?:=.*)?)$/;
+
+// Redirections that make the shell READ the named file. `> .env` and `>> .env`
+// write a file and expose nothing; `<<` and `<<<` name a delimiter or a string
+// rather than a path.
+const READING_REDIRECTIONS = new Set(["<", "<>"]);
+
+// Harness file tools that only WRITE at the path they name. Every other tool is
+// treated as a reader, so an unknown tool name still fails closed.
+const PATH_WRITING_TOOLS = new Set(["write", "edit", "multiedit", "notebookedit"]);
 
 // Shells whose -c payload is another program this policy must classify too.
 const SHELLS = new Set(["sh", "bash", "zsh", "ksh", "dash"]);
 
 // Raw-text markers for the fail-closed unclassifiable path: when the tokenizer
 // cannot parse a command that mentions one of these, refusing beats guessing.
+// Anchored on word boundaries so an ordinary word that merely CONTAINS one -
+// "legitimate", "digits", a github URL - is not mistaken for the command, which
+// would refuse work this guard has no opinion about.
 // COUPLED to the rules above - a new perimeter command needs a marker here.
-const PERIMETER_MARKERS = /(?:sudo|ssh|scp|rsync|chmod|git|\.env)/;
+const PERIMETER_MARKERS = /(?:^|[^\w-])(?:sudo|ssh|scp|rsync|chmod|git)(?![\w-])|\.env(?![\w.-])/;
 
 const MAX_DEPTH = 6;
 
@@ -91,6 +107,34 @@ function isDotenvPath(value) {
 
 function isOption(value) {
   return value.startsWith("-");
+}
+
+// The operands a copy or move READS. The perimeter covers exposing a secret,
+// not creating a file: `cp .env.example .env` writes a fresh local config and
+// exposes nothing, while `cp .env /tmp/x` and `mv .env /tmp/x` carry the secret
+// out. The destination is the trailing operand unless an explicit
+// target-directory option holds it, in which case every operand is a source.
+function copySourceOperands(args) {
+  const operands = [];
+  let destinationIsTrailing = true;
+  for (let index = 0; index < args.length; index += 1) {
+    const value = args[index];
+    if (TARGET_DIRECTORY_OPTION.test(value)) {
+      destinationIsTrailing = false;
+      if (value === "-t" || value === "--target-directory") index += 1;
+      continue;
+    }
+    if (isOption(value)) continue;
+    operands.push(value);
+  }
+  return destinationIsTrailing ? operands.slice(0, -1) : operands;
+}
+
+// A harness file tool that only writes at the path it names exposes no secret,
+// so the path perimeter follows the same source/destination line as the shell
+// rules. An absent or unknown tool name is treated as a read.
+function pathToolReads(tool) {
+  return !PATH_WRITING_TOOLS.has(String(tool).trim().toLowerCase());
 }
 
 // git's own options before the subcommand. -C/-c and the long forms take a
@@ -137,12 +181,13 @@ function classifyGit(position) {
 }
 
 // A redirection target is skipped by commandPosition's word list, so `cat < .env`
-// must be read off the raw node tokens.
-function redirectionTouchesDotenv(tokens) {
+// must be read off the raw node tokens. Only an input redirection reads the
+// file; `echo x > .env` creates one, which the perimeter does not cover.
+function redirectionReadsDotenv(tokens) {
   let pendingTarget = false;
   for (const token of tokens) {
     if (token.type === "redir") {
-      pendingTarget = !token.inlineTarget;
+      pendingTarget = !token.inlineTarget && READING_REDIRECTIONS.has(token.value);
       continue;
     }
     if (pendingTarget && token.type === "word") {
@@ -163,7 +208,12 @@ function shellPayload(position) {
 }
 
 function classifyCommand(command, depth) {
-  if (depth > MAX_DEPTH) return ALLOW;
+  // Nesting deeper than this is not classified, so it is refused on the same
+  // terms as unparseable syntax rather than allowed: a perimeter command buried
+  // under seven layers of substitution must not fall out of the perimeter.
+  if (depth > MAX_DEPTH) {
+    return PERIMETER_MARKERS.test(command) ? deny("unclassifiable-perimeter-command") : ALLOW;
+  }
   const lexed = new Lexer(command).tokenize();
   if (lexed.error) {
     // Fail closed only where it matters: unparseable syntax that mentions a
@@ -176,24 +226,51 @@ function classifyCommand(command, depth) {
   for (const node of nodes) {
     // Every stage of every list matters: a pipeline stage or a backgrounded
     // node runs the command just as surely as a top-level one.
-    if (redirectionTouchesDotenv(node)) return deny("dotenv-access");
-
-    for (const token of node) {
-      if (token.type !== "group") continue;
-      const nested = classifyCommand(token.content, depth + 1);
-      if (nested.decision === "deny") return nested;
-    }
+    if (redirectionReadsDotenv(node)) return deny("dotenv-access");
 
     const position = commandPosition(node);
+
+    // A nested program runs whatever it contains, so every place the shared
+    // lexer parks one is classified against the same perimeter: subshells and
+    // brace groups, the command substitutions, backticks, and process
+    // substitutions it stores on a word's `subs`, and the payload a wrapper
+    // carries inline such as `env -S '<program>'`. Without this descent, a
+    // plain `$(...)` would carry the whole perimeter straight through.
+    for (const payload of position.wrapperPayloads) {
+      const nested = classifyCommand(payload, depth + 1);
+      if (nested.decision === "deny") return nested;
+    }
+    for (const token of node) {
+      if (token.type === "group") {
+        const nested = classifyCommand(token.content, depth + 1);
+        if (nested.decision === "deny") return nested;
+      }
+      if (token.type === "word") {
+        for (const substitution of token.subs) {
+          const nested = classifyCommand(substitution.content, depth + 1);
+          if (nested.decision === "deny") return nested;
+        }
+      }
+    }
+
     if (position.wrappers.includes("sudo")) return deny("privilege-escalation");
-    if (!position.command) continue;
+    if (!position.command) {
+      // A wrapper option the shared classifier could not resolve can hide the
+      // real command position, so a node that mentions the perimeter and
+      // resolves to no command is refused rather than skipped.
+      if (position.unresolvedWrapperOption && position.words.some((word) => PERIMETER_MARKERS.test(word.value))) {
+        return deny("unclassifiable-perimeter-command");
+      }
+      continue;
+    }
 
     const name = basename(position.command.value);
     const denied = DENIED_COMMANDS.get(name);
     if (denied) return deny(denied);
 
     const args = position.words.slice(position.index + 1).map((word) => word.value);
-    if ((READING_COMMANDS.has(name) || COPYING_COMMANDS.has(name)) && args.some(isDotenvPath)) {
+    if (READING_COMMANDS.has(name) && args.some(isDotenvPath)) return deny("dotenv-access");
+    if (COPYING_COMMANDS.has(name) && copySourceOperands(args).some(isDotenvPath)) {
       return deny("dotenv-access");
     }
 
@@ -213,34 +290,31 @@ function classifyCommand(command, depth) {
   return ALLOW;
 }
 
-// The single entry point. A tool call carries a command, a path, or both; each
-// is classified against the same perimeter regardless of which harness or which
-// tool name delivered it.
-function decision({ command = "", path = "" } = {}) {
-  if (path && isDotenvPath(path)) return deny("dotenv-access");
+// The single entry point. A tool call carries a command, a path, or both, plus
+// the harness's own tool name when it has one; each is classified against the
+// same perimeter regardless of which harness delivered it. The tool name is
+// data, never a rule: this owner alone decides what it means.
+function decision({ command = "", path = "", tool = "" } = {}) {
+  if (path && isDotenvPath(path) && pathToolReads(tool)) return deny("dotenv-access");
   if (command) return classifyCommand(command, 0);
   return ALLOW;
 }
 
+const OPTIONS = ["command", "path", "tool"];
+
 function parseArguments(argv) {
-  const result = { command: "", path: "" };
+  const result = { command: "", path: "", tool: "" };
   for (let i = 0; i < argv.length; i += 1) {
     const name = argv[i];
-    if (name === "--command" || name === "--path") {
-      if (i + 1 >= argv.length) throw new Error(`${name} requires a value`);
-      result[name.slice(2)] = argv[i + 1];
-      i += 1;
+    const option = OPTIONS.find((key) => name === `--${key}` || name.startsWith(`--${key}=`));
+    if (!option) throw new Error(`unknown argument: ${name}`);
+    if (name.startsWith(`--${option}=`)) {
+      result[option] = name.slice(option.length + 3);
       continue;
     }
-    if (name.startsWith("--command=")) {
-      result.command = name.slice("--command=".length);
-      continue;
-    }
-    if (name.startsWith("--path=")) {
-      result.path = name.slice("--path=".length);
-      continue;
-    }
-    throw new Error(`unknown argument: ${name}`);
+    if (i + 1 >= argv.length) throw new Error(`${name} requires a value`);
+    result[option] = argv[i + 1];
+    i += 1;
   }
   return result;
 }

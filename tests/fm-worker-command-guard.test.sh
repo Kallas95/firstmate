@@ -63,6 +63,17 @@ matrix_case D21 deny dotenv-access 'cp .env /tmp/stolen'
 matrix_case D22 deny dotenv-access 'mv /srv/app/.env /tmp/x'
 matrix_case D23 deny dotenv-access 'cat < .env'
 matrix_case D24 deny unclassifiable-perimeter-command 'echo "unclosed (group sudo id'
+# A nested program runs what it holds, so a substitution must earn the same
+# reason code its direct form earns. Without this, one $(...) carried the whole
+# perimeter through untouched.
+matrix_case D25 deny dotenv-access 'echo "$(cat .env)"'
+matrix_case D26 deny dotenv-access 'export KEY=$(grep API_KEY .env)'
+matrix_case D27 deny dotenv-access 'diff <(cat .env) /tmp/other'
+matrix_case D28 deny privilege-escalation '`sudo id`'
+matrix_case D29 deny remote-transfer '$(ssh build-host uptime)'
+matrix_case D30 deny permission-change 'echo $(chmod 777 /etc/passwd)'
+matrix_case D31 deny remote-transfer 'env -S "ssh build-host uptime"'
+matrix_case D32 deny dotenv-access 'cp -t /tmp/stash .env'
 
 # ALLOW: ordinary worker work, including the push form the delivery path needs.
 matrix_case A01 allow - 'git push origin HEAD'
@@ -79,6 +90,14 @@ matrix_case A11 allow - 'echo "sudo is forbidden here"'
 matrix_case A12 allow - 'npm test'
 matrix_case A13 allow - 'chmodx --help'
 matrix_case A14 allow - 'echo "unclosed (group without perimeter words'
+# Unparseable text whose only perimeter word is a SUBSTRING of an ordinary word
+# ("legitimate", "digits", a github URL) is work the guard has no opinion about.
+matrix_case A15 allow - 'echo "legitimate work on digits'
+matrix_case A16 allow - 'echo "see https://github.com/example/repo'
+# The refusal covers exposing a secret, not creating a file: a .env destination
+# is ordinary bootstrap work, so only a .env SOURCE is refused.
+matrix_case A17 allow - 'cp .env.example .env'
+matrix_case A18 allow - 'echo "KEY=local" > .env'
 
 MATRIX_TMP=$(mktemp -d "${TMPDIR:-/tmp}/fm-worker-guard-matrix.XXXXXX")
 FM_TEST_CLEANUP_DIRS+=("$MATRIX_TMP")
@@ -160,7 +179,22 @@ test_file_tool_paths() {
 
   out=$(printf '%s' '{"tool_name":"Read","tool_input":{"path":"/srv/app/.env"}}' | "$CHECK" --claude 2>&1); rc=$?
   expect_code 2 "$rc" "a payload using the path field must be classified like file_path"
-  pass "worker guard: .env is refused through both file-tool payload shapes, neighbours are not"
+
+  out=$(printf '%s' '{"tool_name":"Grep","tool_input":{"pattern":".","path":"/srv/app/.env"}}' | "$CHECK" --claude 2>&1); rc=$?
+  expect_code 2 "$rc" "a search tool that returns file content must be classified like a read: $out"
+
+  # Creating a file exposes no secret, so a write tool naming a .env is the same
+  # bootstrap work `cp .env.example .env` is, and must not be refused.
+  out=$(printf '%s' '{"tool_name":"Write","tool_input":{"file_path":"/srv/app/.env","content":"KEY=local"}}' | "$CHECK" --claude 2>&1); rc=$?
+  expect_code 0 "$rc" "creating a .env through a write tool must be allowed: $out"
+
+  out=$(printf '%s' '{"tool_name":"Edit","tool_input":{"file_path":"/srv/app/.env"}}' | "$CHECK" --claude 2>&1); rc=$?
+  expect_code 0 "$rc" "editing a .env through an edit tool must be allowed: $out"
+
+  # An unknown tool name must fall back to the reading side, never the writing one.
+  out=$(printf '%s' '{"tool_name":"SomeFutureTool","tool_input":{"file_path":"/srv/app/.env"}}' | "$CHECK" --claude 2>&1); rc=$?
+  expect_code 2 "$rc" "an unrecognized tool naming a .env must fail closed: $out"
+  pass "worker guard: .env is refused to every reader through both payload shapes, and neighbours and writers are not"
 }
 
 test_cursor_rendering() {
@@ -259,7 +293,7 @@ exit 0
 SH
   install -m 755 "$fakebin/tmux" "$fakebin/tmux.staged"
   mv -f "$fakebin/tmux.staged" "$fakebin/tmux"
-  fm_fake_exit0 "$fakebin" treehouse pi claude
+  fm_fake_exit0 "$fakebin" treehouse pi claude opencode
   printf '%s\n' "$fakebin"
 }
 
@@ -302,6 +336,12 @@ run_spawn() {  # <home> <wt> <fakebin> <fmroot> <spawn-args...>
     FM_SPAWN_NO_GUARD=1 FM_FAKE_PANE_PATH="$wt" TMUX="fake,1,0" \
     PATH="$fakebin:$PATH" \
     "$SPAWN" "$@" 2>&1
+}
+
+# The transport vanishing after launch, as it does when the captain moves or
+# updates the firstmate checkout while a worker is still running.
+remove_guard_transport() {  # <fmroot>
+  rm -f -- "$1/bin/fm-worker-pretool-check.sh"
 }
 
 # drive_pi_tool_call <ext-path> <json-input>: load the generated Pi extension in
@@ -376,7 +416,7 @@ test_pi_worker_without_the_guard_is_refused() {
 
   # The guard disappears after launch: every tool call must be refused loudly
   # rather than silently running unguarded.
-  rm -f "$FMROOT_DIR/bin/fm-worker-pretool-check.sh"
+  remove_guard_transport "$FMROOT_DIR"
   out=$(drive_pi_tool_call "$ext" '{"command":"echo ordinary work"}')
   case "$out" in
     block*worker-guard-unavailable*) ;;
@@ -397,8 +437,22 @@ test_spawn_refuses_when_guard_runtime_is_missing() {
   pass "worker guard: fm-spawn refuses to launch a Pi worker whose guard runtime is missing"
 }
 
+# The per-task .claude/settings.local.json is generated configuration Claude
+# itself consumes, so it is read as a semantic model rather than as text: which
+# PreToolUse registration covers a given tool, under Claude's own matcher
+# semantics - "*" or an empty matcher covers every tool, anything else is a
+# regex over the tool name. Prints that registration's hook command.
+claude_pretool_command_for_tool() {  # <settings> <tool-name>
+  jq -r --arg tool "$2" '
+    (.hooks.PreToolUse // [])
+    | map(select((.matcher // "") as $m
+        | $m == "" or $m == "*" or ($tool | test("^(" + $m + ")$"))))
+    | (.[0].hooks[0].command // empty)
+  ' "$1" 2>/dev/null
+}
+
 test_claude_application_point() {
-  local rec id=guard-claude-1 out settings hook rc
+  local rec id=guard-claude-1 out settings hook rc tool
   rec=$(make_spawn_case claude-guard claude "$id")
   read_case_record "$rec"
   out=$(run_spawn "$HOME_DIR" "$WT_DIR" "$FAKEBIN_DIR" "$FMROOT_DIR" "$id" "$PROJ_DIR")
@@ -406,10 +460,17 @@ test_claude_application_point() {
   settings="$WT_DIR/.claude/settings.local.json"
   assert_present "$settings" "claude spawn did not write the per-task settings"
 
+  # No tool may fall outside the registration: one left off a list is silently
+  # unguarded, which is how a content-returning search tool slipped the
+  # perimeter. A tool name this suite invented must be covered too.
+  for tool in Bash Read Edit Write NotebookEdit Grep Glob WebFetch SomeFutureTool; do
+    [ -n "$(claude_pretool_command_for_tool "$settings" "$tool")" ] \
+      || fail "the Claude PreToolUse registration does not cover the $tool tool"
+  done
+
   # Drive the registration exactly as Claude would: take the recorded PreToolUse
   # command and feed it a real payload.
-  hook=$(jq -r '.hooks.PreToolUse[] | select(.matcher | test("Bash")) | .hooks[0].command' "$settings")
-  [ -n "$hook" ] && [ "$hook" != null ] || fail "claude per-task settings carry no PreToolUse registration"
+  hook=$(claude_pretool_command_for_tool "$settings" Bash)
 
   out=$(printf '%s' '{"tool_name":"Bash","tool_input":{"command":"sudo id"}}' | bash -c "$hook" 2>&1); rc=$?
   expect_code 2 "$rc" "the Claude registration must refuse sudo: $out"
@@ -418,9 +479,68 @@ test_claude_application_point() {
   out=$(printf '%s' '{"tool_name":"Read","tool_input":{"file_path":"/srv/.env"}}' | bash -c "$hook" 2>&1); rc=$?
   expect_code 2 "$rc" "the Claude registration must refuse a .env read: $out"
 
+  out=$(printf '%s' '{"tool_name":"Bash","tool_input":{"command":"echo \"$(cat /srv/.env)\""}}' | bash -c "$hook" 2>&1); rc=$?
+  expect_code 2 "$rc" "the Claude registration must refuse a .env read hidden in a substitution: $out"
+
+  hook=$(claude_pretool_command_for_tool "$settings" Grep)
+  out=$(printf '%s' '{"tool_name":"Grep","tool_input":{"pattern":".","path":"/srv/.env"}}' | bash -c "$hook" 2>&1); rc=$?
+  expect_code 2 "$rc" "the Claude registration must refuse a .env read through a search tool: $out"
+
+  hook=$(claude_pretool_command_for_tool "$settings" Write)
+  out=$(printf '%s' '{"tool_name":"Write","tool_input":{"file_path":"/srv/.env","content":"KEY=local"}}' | bash -c "$hook" 2>&1); rc=$?
+  expect_code 0 "$rc" "the Claude registration must keep creating a .env: $out"
+
+  hook=$(claude_pretool_command_for_tool "$settings" Bash)
   out=$(printf '%s' '{"tool_name":"Bash","tool_input":{"command":"git push origin HEAD"}}' | bash -c "$hook" 2>&1); rc=$?
   expect_code 0 "$rc" "the Claude registration must keep the ordinary task-branch push: $out"
-  pass "worker guard: the Claude per-task registration applies the same perimeter through the same transport"
+  pass "worker guard: the Claude per-task registration covers every tool and applies the same perimeter"
+}
+
+test_claude_worker_without_the_guard_is_refused() {
+  local rec id=guard-claude-2 out settings hook rc
+  rec=$(make_spawn_case claude-guard-missing claude "$id")
+  read_case_record "$rec"
+  out=$(run_spawn "$HOME_DIR" "$WT_DIR" "$FAKEBIN_DIR" "$FMROOT_DIR" "$id" "$PROJ_DIR")
+  expect_code 0 $? "claude spawn should succeed: $out"
+  settings="$WT_DIR/.claude/settings.local.json"
+  hook=$(claude_pretool_command_for_tool "$settings" Bash)
+  [ -n "$hook" ] || fail "claude per-task settings carry no PreToolUse registration"
+
+  # The transport disappears after launch, exactly as the Pi case does. A bare
+  # exec would exit 127, which Claude reads as a non-blocking error and runs the
+  # tool call anyway, so the registration must refuse on its own.
+  remove_guard_transport "$FMROOT_DIR"
+  out=$(printf '%s' '{"tool_name":"Bash","tool_input":{"command":"echo ordinary work"}}' | bash -c "$hook" 2>&1); rc=$?
+  expect_code 2 "$rc" "a Claude worker whose guard vanished must be refused, not allowed: $out"
+  assert_contains "$out" '[worker-guard-unavailable]' "the refusal must name the missing transport"
+  printf '%s' "$out" | jq -e '.hookSpecificOutput.permissionDecision == "deny"' >/dev/null 2>&1 \
+    || fail "the refusal must be Claude's own deny object: $out"
+  pass "worker guard: a Claude worker whose guard is absent is refused, never silently permissive"
+}
+
+# An unwired harness has no application point at all. That is the one outcome
+# the guard cannot let pass silently, so the spawn must say so and still succeed.
+test_unwired_harness_warns_but_still_spawns() {
+  local rec id=guard-unwired out
+  rec=$(make_spawn_case unwired-harness opencode "$id")
+  read_case_record "$rec"
+  out=$(run_spawn "$HOME_DIR" "$WT_DIR" "$FAKEBIN_DIR" "$FMROOT_DIR" "$id" "$PROJ_DIR")
+  expect_code 0 $? "an unwired-harness spawn must still succeed: $out"
+  assert_contains "$out" "opencode" "the warning must name the unwired harness: $out"
+  assert_contains "$out" "NO command perimeter" "the warning must state the worker has no perimeter: $out"
+  pass "worker guard: an unwired harness warns loudly and still spawns"
+}
+
+test_wired_harness_does_not_warn() {
+  local rec id=guard-wired out
+  rec=$(make_spawn_case wired-harness pi "$id")
+  read_case_record "$rec"
+  out=$(run_spawn "$HOME_DIR" "$WT_DIR" "$FAKEBIN_DIR" "$FMROOT_DIR" "$id" "$PROJ_DIR")
+  expect_code 0 $? "pi spawn should succeed: $out"
+  case "$out" in
+    *"NO command perimeter"*) fail "a wired harness must not warn about a missing perimeter: $out" ;;
+  esac
+  pass "worker guard: a wired harness spawns with no missing-perimeter warning"
 }
 
 # The one-definition guarantee, stated as behavior: both application points are
@@ -470,5 +590,8 @@ test_pi_application_point
 test_pi_worker_without_the_guard_is_refused
 test_spawn_refuses_when_guard_runtime_is_missing
 test_claude_application_point
+test_claude_worker_without_the_guard_is_refused
+test_unwired_harness_warns_but_still_spawns
+test_wired_harness_does_not_warn
 test_single_perimeter_definition
 test_scripts_are_shellcheck_clean

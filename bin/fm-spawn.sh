@@ -1266,6 +1266,13 @@ esac
 # missing would hand it a silently unguarded shell, so the spawn refuses here
 # instead. Secondmates are firstmate instances rather than unattended workers
 # and keep their own supervised posture, so the guard is not wired for them.
+#
+# Only the harnesses listed below have an application point. A worker on any
+# other harness starts with no perimeter at all, which is the one outcome the
+# guard exists to make impossible to miss, so it warns loudly instead of
+# starting quietly. It stays a warning rather than a refusal: every other
+# config/crew-harness value is a legitimate worker harness today, and taking
+# them offline is a separate operational decision.
 if [ "$KIND" != secondmate ]; then
   case "$HARNESS" in
     claude*|pi|pi-signed)
@@ -1292,6 +1299,10 @@ if [ "$KIND" != secondmate ]; then
           }
           ;;
       esac
+      ;;
+    *)
+      echo "WARNING: no worker command guard is wired for the '$HARNESS' harness." >&2
+      echo "WARNING: this $KIND worker starts with NO command perimeter - sudo, ssh, scp, rsync, chmod, git config --global, git rebase, a push to master/main, and reading a .env are all unrefused for it. See docs/worker-command-guard.md." >&2
       ;;
   esac
 fi
@@ -2399,9 +2410,24 @@ if [ "$KIND" != secondmate ]; then
       # transport the Pi application point calls, so the two cannot drift apart.
       # The path is absolute because a crewmate's worktree is the PROJECT, not
       # firstmate, so $CLAUDE_PROJECT_DIR does not reach firstmate's bin/.
-      j_guard=$(json_escape "exec $(shell_quote "$FM_ROOT/bin/fm-worker-pretool-check.sh") --claude")
+      #
+      # The matcher is "*" rather than a tool list: any tool left off a list is
+      # silently unguarded, and the next tool that can read a file would reopen
+      # the hole. The transport already exits 0 for a payload carrying neither a
+      # command nor a path, so covering every tool costs nothing and needs no
+      # edit when a harness grows one.
+      #
+      # The registered command tests the transport before exec'ing it. A bare
+      # exec of a transport that has moved or been removed since launch exits
+      # 127, which Claude reads as a non-blocking error, and the tool call would
+      # run with no perimeter at all. This inline check restates no perimeter
+      # rule - it handles only the transport-absent case, matching what the Pi
+      # application point does with guardMissing.
+      guard_bin=$(shell_quote "$FM_ROOT/bin/fm-worker-pretool-check.sh")
+      guard_absent_json="{\"hookSpecificOutput\":{\"hookEventName\":\"PreToolUse\",\"permissionDecision\":\"deny\"},\"systemMessage\":\"[worker-guard-unavailable] the firstmate worker command guard is missing at $FM_ROOT/bin/fm-worker-pretool-check.sh, so this worker has no command perimeter. Report this to firstmate; do not work around it.\"}"
+      j_guard=$(json_escape "test -x $guard_bin || { printf '%s\\n' $(shell_quote "$guard_absent_json") >&2; exit 2; }; exec $guard_bin --claude")
       cat > "$WT/.claude/settings.local.json" <<EOF
-{"hooks":{"UserPromptSubmit":[{"hooks":[{"type":"command","command":"$j_submit"}]}],"PreToolUse":[{"matcher":"Bash|Read|Edit|Write|NotebookEdit","hooks":[{"type":"command","command":"$j_guard"}]}],"Stop":[{"hooks":[{"type":"command","command":"$j_stop"}]}],"StopFailure":[{"hooks":[{"type":"command","command":"$j_stopfail"}]}],"SessionEnd":[{"hooks":[{"type":"command","command":"$j_sessionend"}]}]}}
+{"hooks":{"UserPromptSubmit":[{"hooks":[{"type":"command","command":"$j_submit"}]}],"PreToolUse":[{"matcher":"*","hooks":[{"type":"command","command":"$j_guard"}]}],"Stop":[{"hooks":[{"type":"command","command":"$j_stop"}]}],"StopFailure":[{"hooks":[{"type":"command","command":"$j_stopfail"}]}],"SessionEnd":[{"hooks":[{"type":"command","command":"$j_sessionend"}]}]}}
 EOF
       exclude_path '.claude/settings.local.json'
       ;;
@@ -2514,6 +2540,7 @@ export default function (pi: any) {
     const path = typeof input.path === "string"
       ? input.path
       : (typeof input.file_path === "string" ? input.file_path : "");
+    const tool = event && typeof event.toolName === "string" ? event.toolName : "";
     if (!command && !path) return {};
     if (guardMissing) {
       return {
@@ -2525,6 +2552,7 @@ export default function (pi: any) {
     const args: string[] = [];
     if (command) args.push("--command", command);
     if (path) args.push("--path", path);
+    if (tool) args.push("--tool", tool);
     const result = await guardCheck(args);
     if (result.code === 0) return {};
     return { block: true, reason: result.reason || "denied by the firstmate worker command guard" };

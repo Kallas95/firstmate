@@ -5,7 +5,7 @@
 # command that escapes its task worktree - host privileges, a remote host, a
 # host-wide git config, a rewritten history, a push onto master/main, or a live
 # .env - has no human in front of it. This seatbelt refuses that class of tool
-# call before it runs, for every worker harness firstmate launches.
+# call before it runs, for every worker harness fm-spawn.sh wires it into.
 # bin/fm-worker-command-policy.mjs is the sole owner of the perimeter and of the
 # deny/allow decision; it reuses the shell classifier owned by
 # bin/fm-arm-command-policy.mjs. This wrapper only acquires the harness payload,
@@ -15,12 +15,17 @@
 #
 # Usage:
 #   <PreToolUse JSON on stdin> | bin/fm-worker-pretool-check.sh [--claude|--cursor]
-#   bin/fm-worker-pretool-check.sh --command '<cmd>' [--path '<file>']
+#   bin/fm-worker-pretool-check.sh --command '<cmd>' [--path '<file>'] [--tool '<name>']
 #
 # Stdin mode extracts the command from .tool_input.command (Claude, Codex,
-# Cursor) or .toolInput.command (Grok), and the file path from the matching
-# file_path/path field. CLI mode is used by OpenCode and Pi after their adapters
-# extract the exact values. A payload may carry either, or both.
+# Cursor) or .toolInput.command (Grok), the file path from the matching
+# file_path/path field, and the harness's own tool name from tool_name/toolName.
+# CLI mode is used by OpenCode and Pi after their adapters extract the exact
+# values. A payload may carry any of the three.
+#
+# The tool name is forwarded as data, never interpreted here: the policy owner
+# alone decides what a given tool means for the perimeter, so this transport
+# still restates no rule.
 #
 # Exit/output contract:
 #   ALLOW - exit 0 and no output.
@@ -41,13 +46,14 @@ set -u
 
 CMD=""
 FILE_PATH=""
+TOOL_NAME=""
 CLI_MODE=0
 CLAUDE_MODE=0
 CURSOR_MODE=0
 
 usage() {
   cat <<'EOF'
-Usage: fm-worker-pretool-check.sh [--command <cmd>] [--path <file>] [--claude|--cursor]
+Usage: fm-worker-pretool-check.sh [--command <cmd>] [--path <file>] [--tool <name>] [--claude|--cursor]
 
 With neither --command nor --path, reads a PreToolUse-style JSON payload on
 stdin (Grok toolInput, or Claude/Codex/Cursor tool_input).
@@ -82,6 +88,15 @@ while [ "$#" -gt 0 ]; do
     --path=*)
       FILE_PATH=${1#--path=}
       CLI_MODE=1
+      shift
+      ;;
+    --tool)
+      [ "$#" -gt 1 ] || { echo "error: --tool requires a value" >&2; exit 2; }
+      TOOL_NAME=$2
+      shift 2
+      ;;
+    --tool=*)
+      TOOL_NAME=${1#--tool=}
       shift
       ;;
     --claude)
@@ -139,6 +154,8 @@ if [ "$CLI_MODE" -eq 0 ]; then
     || refuse worker-guard-unreadable "the worker command guard could not parse the tool-call payload and refuses rather than allowing an unclassified call"
   FILE_PATH=$(printf '%s' "$PAYLOAD" | jq -r '(.tool_input.file_path // .tool_input.path // .toolInput.file_path // .toolInput.path // empty)' 2>/dev/null) \
     || refuse worker-guard-unreadable "the worker command guard could not parse the tool-call payload and refuses rather than allowing an unclassified call"
+  TOOL_NAME=$(printf '%s' "$PAYLOAD" | jq -r '(.tool_name // .toolName // empty)' 2>/dev/null) \
+    || refuse worker-guard-unreadable "the worker command guard could not parse the tool-call payload and refuses rather than allowing an unclassified call"
 fi
 
 # A tool call carrying neither a command nor a path holds nothing this perimeter
@@ -154,6 +171,7 @@ command -v node >/dev/null 2>&1 || refuse worker-guard-unavailable "the worker c
 POLICY_ARGS=()
 [ -z "$CMD" ] || POLICY_ARGS+=(--command "$CMD")
 [ -z "$FILE_PATH" ] || POLICY_ARGS+=(--path "$FILE_PATH")
+[ -z "$TOOL_NAME" ] || POLICY_ARGS+=(--tool "$TOOL_NAME")
 
 POLICY_OUTPUT=$(node "$POLICY" "${POLICY_ARGS[@]}" 2>/dev/null) \
   || refuse worker-guard-unavailable "the worker command guard's policy owner failed to classify this tool call, so it is refused rather than allowed"
