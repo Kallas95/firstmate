@@ -52,7 +52,7 @@
 #                          invalid pending retirements were preserved without
 #                          running a check or removing poll artifacts
 #   heartbeat              fleet-scan backstop found an unsurfaced captain-relevant
-#                          status, unless afk is active
+#                          status, unless a live away-mode daemon owns triage
 #   check: inactive-outcome bounded poll-loop reconciliation found a suspicious
 #                          inactive terminal outcome that still lacks its durable
 #                          upstream receipt
@@ -88,6 +88,11 @@ mkdir -p "$STATE"
 . "$SCRIPT_DIR/fm-pending-reply-lib.sh"
 # shellcheck source=bin/fm-busy-lib.sh
 . "$SCRIPT_DIR/fm-busy-lib.sh"
+# The away-mode ownership vocabulary. It already arrives transitively through the
+# transition owner above, but the triage gate below is a correctness decision, so
+# name the dependency here rather than rely on another library's source list.
+# shellcheck source=bin/fm-wake-lib.sh
+. "$SCRIPT_DIR/fm-wake-lib.sh"
 
 WATCH_LOCK="$STATE/.watch.lock"
 WATCH_PATH="$SCRIPT_DIR/fm-watch.sh"
@@ -180,11 +185,32 @@ _event_cap_key=""
 _event_cap_ok=0
 _event_cap_fails=0
 
-# afk_present: 0 while the away-mode flag exists. When set, the daemon wraps this
-# watcher and owns triage, so the watcher must behave one-shot (enqueue + exit on
-# every wake) and let the daemon classify - never absorb here, or the daemon's
+# afk_daemon_owns_triage: 0 only in fm_afk_supervision_state's `daemon` state, a
+# LIVE away-mode daemon holding this home. Then the daemon wraps this watcher and
+# owns triage, so the watcher must behave one-shot (enqueue + exit on every wake)
+# and let the daemon classify - never absorb here, or the daemon's
 # digest/injection layer would never see the wake.
-afk_present() { [ -e "$STATE/.afk" ]; }
+# The flag alone is never that proof. In `armed-no-daemon` nothing exists to
+# consume and batch those handoffs, so one-shotting every benign signal, every
+# distinct stale hash, and every heartbeat would spend a model turn per wake for
+# as long as the flag stays. That state keeps the ORDINARY triage, which is what
+# the native mechanisms re-arm this watcher for
+# (docs/watcher-continuity.md "Away-mode stand-down").
+# Memoized per poll cycle: the predicate short-circuits when the flag is absent,
+# but in away mode it reads process identity, and this is asked once per window
+# plus once per heartbeat. AFK_TRIAGE_VERDICT is cleared at the top of every
+# cycle, so a mid-cycle away-mode transition is honored on the next one.
+AFK_TRIAGE_VERDICT=
+afk_daemon_owns_triage() {
+  if [ -z "$AFK_TRIAGE_VERDICT" ]; then
+    if fm_afk_daemon_owns_supervision "$STATE"; then
+      AFK_TRIAGE_VERDICT=daemon
+    else
+      AFK_TRIAGE_VERDICT=no
+    fi
+  fi
+  [ "$AFK_TRIAGE_VERDICT" = daemon ]
+}
 
 hash_pane() {
   if command -v md5 >/dev/null 2>&1; then md5 -q; else md5sum | cut -d' ' -f1; fi
@@ -837,6 +863,9 @@ while :; do
     exit 0
   fi
 
+  # One away-mode ownership verdict per cycle (see afk_daemon_owns_triage).
+  AFK_TRIAGE_VERDICT=
+
   # Liveness beacon for fm-guard.sh: a fresh mtime here means a watcher is
   # alive. Supervision scripts warn when this goes stale with tasks in flight.
   touch "$STATE/.last-watcher-beat"
@@ -961,7 +990,7 @@ $pending
 EOF
     reason="signal:$files"
     # Triage: a signal is ACTIONABLE when any of these holds (cheapest first):
-    #   - the away-mode daemon owns triage (afk) and wants every wake;
+    #   - a live away-mode daemon owns triage and wants every wake;
     #   - any status file carries a captain-relevant verb;
     #   - or it is a no-verb wake (a bare turn-end, a working: note) whose crew is
     #     NOT provably working - the crew stopped its turn with no actively-running
@@ -972,9 +1001,9 @@ EOF
     # whose crew IS provably working) in always-on mode -> advance the markers so it
     # will not re-fire, log, and keep blocking without enqueuing. The provably-working
     # check is the only costly one (it may run a bounded no-mistakes call), so the ||
-    # ordering evaluates it ONLY for a non-afk, no-captain-verb signal.
+    # ordering evaluates it ONLY for a no-captain-verb signal with no daemon behind it.
     # shellcheck disable=SC2086  # $files is a space-separated status-path list (ids carry no spaces)
-    if afk_present || signal_reason_is_actionable $files || ! signal_crew_provably_working $files; then
+    if afk_daemon_owns_triage || signal_reason_is_actionable $files || ! signal_crew_provably_working $files; then
       while IFS=$(printf '\t') read -r sf sig f; do
         [ -n "$sf" ] || continue
         fm_wake_append signal "$(basename "$f")" "$reason" || exit 1
@@ -1044,8 +1073,8 @@ EOF
             paused) handle_paused_stale "$w" "$task" "$h" ;;
             *)      clear_pause_tracking "$w" ;;
           esac
-        elif afk_present; then
-          # Daemon owns triage: one-shot per distinct stale hash, as before.
+        elif afk_daemon_owns_triage; then
+          # A live daemon owns triage: one-shot per distinct stale hash, as before.
           if [ "$(cat "$sf" 2>/dev/null || true)" != "$h" ]; then
             fm_wake_append stale "$w" "stale: $w" || exit 1
             printf '%s' "$h" > "$sf"
@@ -1157,7 +1186,7 @@ EOF
         rm -f "$ssf" "$ewf"
       fi
       task=$(window_to_task "$w" "$STATE")
-      if ! afk_present && status_is_paused_or_captain_held "$(last_status_line "$STATE/$task.status")" && [ "$busy_now" -ne 0 ]; then
+      if ! afk_daemon_owns_triage && status_is_paused_or_captain_held "$(last_status_line "$STATE/$task.status")" && [ "$busy_now" -ne 0 ]; then
         case "$(pause_state_class "$w" "$task")" in
           paused) handle_paused_stale "$w" "$task" "$h" ;;
           *)      clear_pause_tracking "$w" ;;
@@ -1180,9 +1209,9 @@ EOF
     # Triage: in always-on mode a heartbeat is benign unless the cheap fleet-scan
     # turns up a captain-relevant status the per-wake path missed. Absorb the
     # no-change case (advance the schedule and back off exactly as wake() would,
-    # without exiting); the away-mode daemon, when present, owns triage and wants
-    # every heartbeat.
-    if afk_present; then
+    # without exiting); a LIVE away-mode daemon owns triage and wants every
+    # heartbeat, but a flag with none does not - nothing would consume them.
+    if afk_daemon_owns_triage; then
       fm_wake_append heartbeat heartbeat heartbeat || exit 1
       touch "$STATE/.last-heartbeat"
       wake "heartbeat"

@@ -470,9 +470,11 @@ test_park_inert_when_afk_daemon_is_alive() {
 }
 
 # The away-mode flag alone used to stand this park down. A flag with no daemon
-# behind it supervises nothing, so the park must remain the home's only cover.
+# behind it supervises nothing, so the park must remain the home's only cover -
+# and say so: a healthy park keeps fm-guard.sh's banner away, so without this the
+# broken away mode would not surface until the next session start.
 test_park_active_when_afk_flag_has_no_daemon() {
-  local dir out
+  local dir out live
   dir=$(make_primary_dir "$TMP_ROOT/park-afk-no-daemon")
   : > "$dir/state/task1.meta"
   fm_fake_afk_flagged_no_daemon "$dir/state"
@@ -480,8 +482,20 @@ test_park_active_when_afk_flag_has_no_daemon() {
   out=$(run_park "$dir")
   [ -e "$dir/state/arm-ran" ] || fail "the park stayed inert with away mode flagged and no daemon running"
   assert_contains "$out" "followup_message" "the park must still deliver its wake as a follow-up"
+  assert_contains "$out" "AWAY MODE IS FLAGGED BUT ITS DAEMON IS NOT RUNNING" \
+    "the wake follow-up did not name the away mode that stopped supervising"
+  assert_contains "$out" "this stop-hook watcher park" \
+    "the notice did not name the park as the cover that took over"
   assert_present "$dir/state/.afk" "the park must never clear the captain's away-mode flag"
-  pass "cursor park: stays the home's cover when away mode is flagged with no daemon"
+
+  # A home that never entered away mode carries no such notice.
+  live=$(make_primary_dir "$TMP_ROOT/park-no-afk-notice")
+  : > "$live/state/task1.meta"
+  write_arm_fixture "$live" actionable
+  out=$(run_park "$live")
+  assert_contains "$out" "followup_message" "the ordinary wake follow-up is missing"
+  assert_not_contains "$out" "AWAY MODE IS FLAGGED" "a home with no away mode was told its away mode is broken"
+  pass "cursor park: stays the home's cover when away mode is flagged with no daemon, and names it"
 }
 
 test_park_stands_down_when_away_mode_activates_before_commit() {

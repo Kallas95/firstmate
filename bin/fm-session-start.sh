@@ -831,7 +831,10 @@ done
 [ "$ORPHAN_STATUS_FOUND" -eq 1 ] || printf '(none)\n'
 
 subsection "AFK"
-case "$(fm_afk_supervision_state "$STATE")" in
+# The verdict resolved for the supervision block above, not a second reading: two
+# reads can disagree, and a digest that contradicts the block and the next step
+# printed by the same session start is worse than a slightly older answer.
+case "$AFK_PRESENT" in
   daemon)
     printf 'present - away-mode supervision is active; the daemon owns the watcher.\n'
     ;;

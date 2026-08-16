@@ -132,14 +132,21 @@ repair_line() {
     printf '%s\n' 'Away mode owns watcher supervision; load /afk and ensure the daemon is running instead of starting normal supervision directly.'
     return 0
   fi
+  # armed-no-daemon DIAGNOSES, it never replaces the repair procedure: only
+  # claude, cursor, pi, and opencode re-arm by themselves, so telling codex or
+  # grok that "supervision stays armed" would drop the one instruction that
+  # actually restores it. The harness line follows the diagnosis unchanged.
+  prefix=
   if [ "$AFK" = armed-no-daemon ]; then
-    printf '%s\n' 'Away mode is flagged but its daemon is NOT running, so nothing owns supervision; load /afk to restart the daemon, or exit away mode - normal harness supervision stays armed until one of those happens.'
-    return 0
+    prefix='Away mode is flagged but its daemon is NOT running, so nothing owns supervision; load /afk to restart the daemon, or exit away mode - and until one of those happens normal harness supervision is the only cover left, so '
   fi
 
-  prefix=
   if [ "$QUEUE_PENDING" -eq 1 ]; then
-    prefix='After draining queued wakes, '
+    if [ -n "$prefix" ]; then
+      prefix="${prefix}after draining queued wakes, "
+    else
+      prefix='After draining queued wakes, '
+    fi
   fi
   if [ "$X_MODE" -eq 1 ]; then
     prefix="${prefix}source ${x_mode_env_sh} first, then "

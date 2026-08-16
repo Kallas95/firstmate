@@ -129,7 +129,7 @@ unit_fresh_vs_refresh() {
   : > "$st/state/.subsuper-escalations"
   : > "$st/state/.subsuper-inject-wedged"
   # A live "daemon": a real process whose identity the lock records, so
-  # daemon_lock_held_by_live_daemon returns true (a refresh).
+  # fm_afk_daemon_alive returns true (a refresh).
   sleep 600 &
   sleep_pid=$!
   lock="$st/state/.supervise-daemon.lock"
@@ -554,6 +554,38 @@ unit_status_needs_no_lock() {
   else
     fail "away state: status blocked or misreported under a held launcher lock, got '$state'"
   fi
+  rm -rf "$st"
+}
+
+# The help text is this script's own emitted interface, and its every subcommand
+# has to survive to the reader: a hard-coded line range silently truncated the
+# `status` entry mid-sentence as soon as the header grew.
+unit_help_documents_every_subcommand_untruncated() {
+  local st out sub status
+  st=$(mktemp -d "${TMPDIR:-/tmp}/fm-afk-help.XXXXXX")
+  mkdir -p "$st/state"
+  out=$(FM_HOME="$st" FM_STATE_OVERRIDE="$st/state" "$LAUNCH" help 2>&1)
+  status=$?
+  if [ "$status" -ne 0 ]; then
+    fail "help: exited $status instead of printing usage"
+    rm -rf "$st"
+    return
+  fi
+  for sub in start start-native stop reconcile status; do
+    printf '%s\n' "$out" | grep -F "fm-afk-launch.sh $sub" >/dev/null \
+      || fail "help: the $sub subcommand is missing from the emitted usage"
+  done
+  # The last sentence of the last documented subcommand, and the trailing
+  # paragraphs after it: the truncation cut exactly here.
+  printf '%s\n' "$out" | grep -F "reads instead of testing the flag." >/dev/null \
+    || fail "help: the status entry is truncated mid-sentence"
+  printf '%s\n' "$out" | grep -F "Supported backends:" >/dev/null \
+    || fail "help: the supported-backend paragraph was cut off"
+  printf '%s\n' "$out" | grep -F "Test seam:" >/dev/null \
+    || fail "help: the test-seam paragraph was cut off"
+  printf '%s\n' "$out" | grep -q '^set -u$' \
+    && fail "help: printed past the header comment block into the script body"
+  pass "help: prints the whole header block, ending at the first non-comment line"
   rm -rf "$st"
 }
 
@@ -1034,6 +1066,7 @@ unit_readiness_failure_preserves_unconfirmed_record
 unit_tmux_absence_distinguishes_probe_failure
 unit_afk_supervision_state
 unit_status_needs_no_lock
+unit_help_documents_every_subcommand_untruncated
 unit_native_entry_reports_no_supervision_until_the_daemon_lands
 unit_native_lifecycle
 unit_native_entry_preserves_prepared_state

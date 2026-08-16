@@ -351,8 +351,15 @@ fi
 
 if [ "$ACTIONABLE" -eq 1 ]; then
   WAKE=$(grep -E '^(signal:|stale:|check:|heartbeat)' "$ARM_OUT" 2>/dev/null | head -8)
+  # A park that keeps the watcher healthy also keeps fm-guard.sh's banner away,
+  # so without this line a broken away mode would not surface until the next
+  # session start. The repair follow-up already names it through the shared
+  # turn-end guard's reason; this is the wake path's half of that coverage.
+  AFK_NOTICE=$(fm_afk_daemon_down_notice "$STATE" 'this stop-hook watcher park')
+  [ -z "$AFK_NOTICE" ] || AFK_NOTICE="
+$AFK_NOTICE"
   emit_followup watcher "firstmate watcher wake - one supervision event needs a handling turn now.
-$WAKE
+$WAKE$AFK_NOTICE
 
 Run bin/fm-wake-drain.sh first, handle the wake, then run its exact WAKE_ACK_REQUIRED --ack-through command. Until that post-handling acknowledgement, interruption leaves the wake durable for idempotent re-handling. This stop hook owns watcher continuity: when the handling turn ends, the next needed cycle parks automatically - do NOT run bin/fm-watch-arm.sh after an ordinary wake." reset-budget
 fi

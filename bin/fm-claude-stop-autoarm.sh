@@ -166,9 +166,7 @@ write_epoch() {  # <outcome>
 # flagged with no daemon behind it. Without it the model handles the wake, ends
 # the turn, arms again, and never learns that away mode stopped supervising.
 afk_daemon_down_notice() {
-  [ -e "$STATE/.afk" ] || return 0
-  fm_afk_daemon_alive "$STATE" && return 0
-  printf 'AWAY MODE IS FLAGGED BUT ITS DAEMON IS NOT RUNNING - state/.afk is set and no away-mode daemon holds this home, so away mode is supervising nothing and this Stop-owned arm is the only cover. Load /afk to restart the daemon, or exit away mode.\n'
+  fm_afk_daemon_down_notice "$STATE" 'this Stop-owned arm'
 }
 
 write_epoch arming

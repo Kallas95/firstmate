@@ -155,8 +155,11 @@ fm_afk_launch_lock_release() {
   rm -rf "$FM_AFK_LAUNCH_LOCK"
 }
 
+# The header block IS the help text. Bounded by the first non-comment line rather
+# than a hard-coded range, so editing the header can no longer silently truncate
+# the help mid-sentence the way a stale range did.
 fm_afk_launch_usage() {
-  sed -n '2,45p' "${BASH_SOURCE[0]}" | sed 's/^# \{0,1\}//'
+  awk 'NR == 1 { next } !/^#/ { exit } { sub(/^# ?/, ""); print }' "${BASH_SOURCE[0]}"
 }
 
 # The command run inside the created terminal. Real launch runs the shared

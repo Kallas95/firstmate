@@ -375,6 +375,19 @@ fm_afk_daemon_owns_supervision() {
   fm_afk_daemon_alive "$state"
 }
 
+# fm_afk_daemon_down_notice <state> <what-covers-this-home>
+# The one sentence every turn-end mechanism prints with its own banner while away
+# mode is flagged with no daemon behind it, so the state is named wherever the
+# session already looks. Silent otherwise. <what-covers-this-home> names the
+# mechanism that took over, because that is the only part that differs per
+# harness and duplicating the sentence per hook is how the wordings drift apart.
+fm_afk_daemon_down_notice() {
+  local state=$1 cover=$2
+  [ -e "$state/.afk" ] || return 0
+  fm_afk_daemon_alive "$state" && return 0
+  printf 'AWAY MODE IS FLAGGED BUT ITS DAEMON IS NOT RUNNING - state/.afk is set and no away-mode daemon holds this home, so away mode is supervising nothing and %s is the only cover. Load /afk to restart the daemon, or exit away mode.\n' "$cover"
+}
+
 fm_lock_clean_known_files() {
   local lockdir=$1
   rm -f \
