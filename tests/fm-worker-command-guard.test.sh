@@ -90,6 +90,22 @@ matrix_case D40 deny history-rewrite 'until false; do git rebase main; done'
 matrix_case D41 deny permission-change 'time chmod +x a'
 matrix_case D42 deny remote-transfer 'while read -r h; do ssh "$h" uptime; done'
 matrix_case D43 deny privilege-escalation 'if true; then ! sudo id; fi'
+# Sourcing a secrets file reads it into the shell exactly as printing it does,
+# and it is how a wandering worker loads environment variables.
+matrix_case D44 deny dotenv-access 'source .env'
+matrix_case D45 deny dotenv-access '. .env'
+matrix_case D46 deny dotenv-access 'set -a; source .env; set +a'
+matrix_case D47 deny dotenv-access 'eval "cat .env"'
+matrix_case D48 deny remote-transfer 'eval "ssh build-host uptime"'
+# A command carried in another tool's arguments really runs, so it is classified
+# exactly like a submitted one.
+matrix_case D49 deny permission-change 'find . -name "*.sh" -exec chmod +x {} \;'
+matrix_case D50 deny permission-change 'find . -execdir chmod +x {} +'
+matrix_case D51 deny dotenv-access 'find . -ok cat .env \;'
+matrix_case D52 deny remote-transfer 'find . -okdir ssh host uptime \;'
+matrix_case D53 deny permission-change 'echo x | xargs chmod +x'
+matrix_case D54 deny remote-transfer 'xargs -0 -n1 ssh'
+matrix_case D55 deny permission-change 'git ls-files | xargs -I {} chmod 755 {}'
 
 # ALLOW: ordinary worker work, including the push form the delivery path needs.
 matrix_case A01 allow - 'git push origin HEAD'
@@ -121,6 +137,17 @@ matrix_case A20 allow - 'if [ -f package.json ]; then npm test; fi'
 matrix_case A21 allow - 'echo "run do and done and time here"'
 matrix_case A22 allow - 'grep -rn done src/'
 matrix_case A23 allow - 'cp -r src/config .env.example'
+# tee has no source operand: it writes every one of them, so a .env there is a
+# destination and the verdict must not depend on operand order.
+matrix_case A24 allow - 'echo x | tee .env other.txt'
+matrix_case A25 allow - 'echo x | tee other.txt .env'
+matrix_case A26 allow - 'tee .env'
+# Sourcing an ordinary script, and carrier tools carrying ordinary work.
+matrix_case A27 allow - '. ./scripts/env.sh'
+matrix_case A28 allow - 'source scripts/setup.sh'
+matrix_case A29 allow - 'find . -name "*.md" -exec wc -l {} +'
+matrix_case A30 allow - 'git ls-files | xargs wc -l'
+matrix_case A31 allow - 'eval "npm test"'
 
 MATRIX_TMP=$(mktemp -d "${TMPDIR:-/tmp}/fm-worker-guard-matrix.XXXXXX")
 FM_TEST_CLEANUP_DIRS+=("$MATRIX_TMP")

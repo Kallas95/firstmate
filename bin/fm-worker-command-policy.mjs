@@ -53,13 +53,21 @@ const DENIED_COMMANDS = new Map([
 ]);
 
 // Commands that read file contents. Denied only when an argument names a .env.
+// The sourcing builtins read their operand into the shell, which is the most
+// ordinary way a worker loads a secrets file, so they belong here: `. .env` and
+// `source .env` expose exactly what `cat .env` exposes. A sourced path whose
+// basename is not `.env` is untouched, so `. ./scripts/env.sh` stays ordinary.
 const READING_COMMANDS = new Set([
   "cat", "less", "more", "tail", "head", "strings", "od", "xxd", "base64",
   "nl", "tac", "bat", "sed", "awk", "grep", "egrep", "fgrep", "rg", "cut", "sort",
+  "source", ".",
 ]);
 
 // Commands that copy or relocate a file. Denied when a .env is a SOURCE.
-const COPYING_COMMANDS = new Set(["cp", "mv", "install", "ln", "tee", "rsync", "scp"]);
+// `tee` is deliberately absent: it has no source operand, it reads stdin and
+// writes every operand, so a .env there is a destination. Nothing escapes that
+// way - a pipeline's reading stage is classified by its own node.
+const COPYING_COMMANDS = new Set(["cp", "mv", "install", "ln", "rsync", "scp"]);
 
 // Options that move a copy's destination out of the trailing operand, so every
 // remaining operand is a source: `cp -t /tmp .env` copies the secret out too.
@@ -82,6 +90,12 @@ const PATH_WRITING_TOOLS = new Set(["write", "edit", "multiedit", "notebookedit"
 
 // Shells whose -c payload is another program this policy must classify too.
 const SHELLS = new Set(["sh", "bash", "zsh", "ksh", "dash"]);
+
+// find's options that carry a command, and the two words that end the carried
+// argument list. The carried command really runs, so it is classified exactly
+// like a submitted one.
+const FIND_CARRIER_OPTIONS = new Set(["-exec", "-execdir", "-ok", "-okdir"]);
+const FIND_CARRIER_TERMINATORS = new Set([";", "+"]);
 
 // Raw-text markers for the fail-closed unclassifiable path: when the tokenizer
 // cannot parse a command that mentions one of these, refusing beats guessing.
@@ -224,6 +238,53 @@ function withoutLeadingKeywords(tokens) {
   return start === 0 ? tokens : tokens.slice(start);
 }
 
+// The command each carrier tool runs out of its own arguments, as token lists
+// classified through the same node path a submitted command takes.
+//
+// find delimits its payload explicitly, so it is read exactly. xargs does not:
+// its option set is large and several options take a separate value, so rather
+// than resolve the boundary with a second option table this treats EVERY
+// non-option argument as the start of a candidate command. An option value that
+// happens to name a perimeter command is then refused, which is the direction an
+// unresolvable spelling has to fall for a perimeter.
+function carriedPrograms(position) {
+  const name = basename(position.command.value);
+  const words = position.words.slice(position.index + 1);
+  if (name === "find") {
+    const programs = [];
+    for (let index = 0; index < words.length; index += 1) {
+      if (!FIND_CARRIER_OPTIONS.has(words[index].value)) continue;
+      const carried = [];
+      index += 1;
+      while (index < words.length && !FIND_CARRIER_TERMINATORS.has(words[index].value)) {
+        carried.push(words[index]);
+        index += 1;
+      }
+      if (carried.length > 0) programs.push(carried);
+    }
+    return programs;
+  }
+  if (name === "xargs") {
+    const programs = [];
+    for (let index = 0; index < words.length; index += 1) {
+      if (isOption(words[index].value)) continue;
+      programs.push(words.slice(index));
+    }
+    return programs;
+  }
+  return [];
+}
+
+// The payload of `eval '<program>'`, or "" when the arguments cannot be read as
+// one. eval runs the concatenation of its arguments, so it is classified the way
+// an inline shell payload is.
+function evalPayload(position) {
+  const words = position.words.slice(position.index + 1);
+  if (words.length === 0) return "";
+  if (words.some((word) => !word.literal || word.subs.length > 0)) return "";
+  return words.map((word) => word.value).join(" ");
+}
+
 // The payload of `sh -c '<program>'`, or "" when this is not such an invocation.
 function shellPayload(position) {
   const words = position.words;
@@ -252,66 +313,92 @@ function classifyCommand(command, depth) {
   for (const node of nodes) {
     // Every stage of every list matters: a pipeline stage or a backgrounded
     // node runs the command just as surely as a top-level one.
-    if (redirectionReadsDotenv(node)) return deny("dotenv-access");
+    const verdict = classifyNode(node, depth);
+    if (verdict.decision === "deny") return verdict;
+  }
+  return ALLOW;
+}
 
-    const position = commandPosition(withoutLeadingKeywords(node));
+function classifyNode(node, depth) {
+  if (depth > MAX_DEPTH) {
+    return node.some((token) => token.type === "word" && PERIMETER_MARKERS.test(token.value))
+      ? deny("unclassifiable-perimeter-command")
+      : ALLOW;
+  }
+  if (redirectionReadsDotenv(node)) return deny("dotenv-access");
 
-    // A nested program runs whatever it contains, so every place the shared
-    // lexer parks one is classified against the same perimeter: subshells and
-    // brace groups, the command substitutions, backticks, and process
-    // substitutions it stores on a word's `subs`, and the payload a wrapper
-    // carries inline such as `env -S '<program>'`. Without this descent, a
-    // plain `$(...)` would carry the whole perimeter straight through.
-    for (const payload of position.wrapperPayloads) {
+  const position = commandPosition(withoutLeadingKeywords(node));
+
+  // A nested program runs whatever it contains, so every place the shared
+  // lexer parks one is classified against the same perimeter: subshells and
+  // brace groups, the command substitutions, backticks, and process
+  // substitutions it stores on a word's `subs`, and the payload a wrapper
+  // carries inline such as `env -S '<program>'`. Without this descent, a
+  // plain `$(...)` would carry the whole perimeter straight through.
+  for (const payload of position.wrapperPayloads) {
+    const nested = classifyCommand(payload, depth + 1);
+    if (nested.decision === "deny") return nested;
+  }
+  for (const token of node) {
+    if (token.type === "group") {
+      const nested = classifyCommand(token.content, depth + 1);
+      if (nested.decision === "deny") return nested;
+    }
+    if (token.type === "word") {
+      for (const substitution of token.subs) {
+        const nested = classifyCommand(substitution.content, depth + 1);
+        if (nested.decision === "deny") return nested;
+      }
+    }
+  }
+
+  if (position.wrappers.includes("sudo")) return deny("privilege-escalation");
+  if (!position.command) {
+    // A wrapper option the shared classifier could not resolve can hide the
+    // real command position, so a node that mentions the perimeter and
+    // resolves to no command is refused rather than skipped.
+    if (position.unresolvedWrapperOption && position.words.some((word) => PERIMETER_MARKERS.test(word.value))) {
+      return deny("unclassifiable-perimeter-command");
+    }
+    return ALLOW;
+  }
+
+  const name = basename(position.command.value);
+  const denied = DENIED_COMMANDS.get(name);
+  if (denied) return deny(denied);
+
+  const args = position.words.slice(position.index + 1).map((word) => word.value);
+  if (READING_COMMANDS.has(name) && args.some(isDotenvPath)) return deny("dotenv-access");
+  if (COPYING_COMMANDS.has(name) && copySourceOperands(args).some(isDotenvPath)) {
+    return deny("dotenv-access");
+  }
+
+  if (name === "git") {
+    const gitDecision = classifyGit(position);
+    if (gitDecision.decision === "deny") return gitDecision;
+  }
+
+  if (SHELLS.has(name)) {
+    const payload = shellPayload(position);
+    if (payload) {
       const nested = classifyCommand(payload, depth + 1);
       if (nested.decision === "deny") return nested;
     }
-    for (const token of node) {
-      if (token.type === "group") {
-        const nested = classifyCommand(token.content, depth + 1);
-        if (nested.decision === "deny") return nested;
-      }
-      if (token.type === "word") {
-        for (const substitution of token.subs) {
-          const nested = classifyCommand(substitution.content, depth + 1);
-          if (nested.decision === "deny") return nested;
-        }
-      }
-    }
+  }
 
-    if (position.wrappers.includes("sudo")) return deny("privilege-escalation");
-    if (!position.command) {
-      // A wrapper option the shared classifier could not resolve can hide the
-      // real command position, so a node that mentions the perimeter and
-      // resolves to no command is refused rather than skipped.
-      if (position.unresolvedWrapperOption && position.words.some((word) => PERIMETER_MARKERS.test(word.value))) {
-        return deny("unclassifiable-perimeter-command");
-      }
-      continue;
+  if (name === "eval") {
+    const payload = evalPayload(position);
+    if (payload) {
+      const nested = classifyCommand(payload, depth + 1);
+      if (nested.decision === "deny") return nested;
+    } else if (position.words.some((word) => PERIMETER_MARKERS.test(word.value))) {
+      return deny("unclassifiable-perimeter-command");
     }
+  }
 
-    const name = basename(position.command.value);
-    const denied = DENIED_COMMANDS.get(name);
-    if (denied) return deny(denied);
-
-    const args = position.words.slice(position.index + 1).map((word) => word.value);
-    if (READING_COMMANDS.has(name) && args.some(isDotenvPath)) return deny("dotenv-access");
-    if (COPYING_COMMANDS.has(name) && copySourceOperands(args).some(isDotenvPath)) {
-      return deny("dotenv-access");
-    }
-
-    if (name === "git") {
-      const gitDecision = classifyGit(position);
-      if (gitDecision.decision === "deny") return gitDecision;
-    }
-
-    if (SHELLS.has(name)) {
-      const payload = shellPayload(position);
-      if (payload) {
-        const nested = classifyCommand(payload, depth + 1);
-        if (nested.decision === "deny") return nested;
-      }
-    }
+  for (const carried of carriedPrograms(position)) {
+    const nested = classifyNode(carried, depth + 1);
+    if (nested.decision === "deny") return nested;
   }
   return ALLOW;
 }
