@@ -1,0 +1,118 @@
+
+===============================================================================
+SCENARIO
+  crew 'api' posts: needs-decision [key=api-shape]: ship the v2 endpoint as PATCH or POST?
+  ...then waits. Its pane is idle and unchanged; the backend still reports the agent working
+  (provably working). The captain has not answered yet.
+  FM_STALE_ESCALATE_SECS=240 - the live four-minute wedge cycle.
+
+===============================================================================
+PART 1 - BASE COMMIT ef35d79 (bug reproduction): a wedge escalation every 4 minutes
+
+--- t+0     first sight of the idle pane
+    absorbed - watcher still polling, firstmate never woken
+      triage log: absorbed stale (provably working, overriding a stale captain-relevant status): fleet:fm-api-shape
+      state: WEDGE-TIMER-ARMED(idle 11s) 
+
+--- t+4min   captain still has not answered
+    >>> FIRSTMATE WOKEN (watcher exited, one captain turn spent):
+          stale: fleet:fm-api-shape (idle 500s, possible wedge, escalation 1)
+      triage log: absorbed stale (provably working, overriding a stale captain-relevant status): fleet:fm-api-shape
+      state: wedge-timer-disarmed 
+      captain queue: 1786906077	1	stale	fleet:fm-api-shape	stale: fleet:fm-api-shape (idle 500s, possible wedge, escalation 1)
+      captain queue: api [key=api-shape] needs-decision: ship the v2 endpoint as PATCH or POST?
+
+--- t+8min   captain still has not answered
+    >>> FIRSTMATE WOKEN (watcher exited, one captain turn spent):
+          stale: fleet:fm-api-shape (idle 501s, possible wedge, escalation 2)
+      triage log: absorbed stale (provably working, overriding a stale captain-relevant status): fleet:fm-api-shape
+      state: wedge-timer-disarmed 
+      captain queue: 1786906079	2	stale	fleet:fm-api-shape	stale: fleet:fm-api-shape (idle 501s, possible wedge, escalation 2)
+      captain queue: api [key=api-shape] needs-decision: ship the v2 endpoint as PATCH or POST?
+
+--- t+12min   captain still has not answered
+    >>> FIRSTMATE WOKEN (watcher exited, one captain turn spent):
+          stale: fleet:fm-api-shape (idle 501s, possible wedge, escalation 3, demand-deep-inspection: same pane has wedge-escalated 3 times in a row - do not re-absorb on the run-step/pane state alone)
+      triage log: absorbed stale (provably working, overriding a stale captain-relevant status): fleet:fm-api-shape
+      state: wedge-timer-disarmed 
+      captain queue: 1786906080	3	stale	fleet:fm-api-shape	stale: fleet:fm-api-shape (idle 501s, possible wedge, escalation 3, demand-deep-inspection: same pane has wedge-escalated 3 times in a row - do not re-absorb on the run-step/pane state alone)
+      captain queue: api [key=api-shape] needs-decision: ship the v2 endpoint as PATCH or POST?
+
+  >>> firstmate turns spent on this un-answered decision: 3
+
+===============================================================================
+PART 2 - THIS BRANCH: same fixture, same 240s threshold, wedge timer planted as crossed
+
+--- t+0     first sight of the idle pane
+    absorbed - watcher still polling, firstmate never woken
+      triage log: absorbed stale (decision held, awaiting captain, age 12s): fleet:fm-api-shape
+      state: decision-held-marker=set wedge-timer-disarmed 
+
+--- t+4min   captain still has not answered
+    absorbed - watcher still polling, firstmate never woken
+      triage log: absorbed stale (decision held, awaiting captain, age 25s): fleet:fm-api-shape
+      state: decision-held-marker=set wedge-timer-disarmed 
+
+--- t+8min   captain still has not answered
+    absorbed - watcher still polling, firstmate never woken
+      triage log: absorbed stale (decision held, awaiting captain, age 40s): fleet:fm-api-shape
+      state: decision-held-marker=set wedge-timer-disarmed 
+
+--- t+12min   captain still has not answered
+    absorbed - watcher still polling, firstmate never woken
+      triage log: absorbed stale (decision held, awaiting captain, age 54s): fleet:fm-api-shape
+      state: decision-held-marker=set wedge-timer-disarmed 
+
+  >>> firstmate turns spent on this un-answered decision: 0
+
+===============================================================================
+PART 3 - THIS BRANCH: the long re-surface cadence still rechecks the decision once a window
+  (age the status file past FM_PAUSE_RESURFACE_SECS - the bounded recheck, not a wedge)
+
+--- t+1h    one bounded recheck per window
+    >>> FIRSTMATE WOKEN (watcher exited, one captain turn spent):
+          stale: fleet:fm-api-shape (decision held 501s, awaiting captain - rechecked on a long cadence not a wedge; confirm the decision is still open)
+      triage log: absorbed stale (decision held, awaiting captain, age 54s): fleet:fm-api-shape
+      state: decision-held-marker=set decision-resurfaced-throttle=set wedge-timer-disarmed 
+      captain queue: 1786906136	1	stale	fleet:fm-api-shape	stale: fleet:fm-api-shape (decision held 501s, awaiting captain - rechecked on a long cadence not a wedge; confirm the decision is still open)
+      captain queue: api [key=api-shape] needs-decision: ship the v2 endpoint as PATCH or POST?
+
+===============================================================================
+PART 4 - THIS BRANCH: the captain answers, the crew stays mute - wedge cadence resumes
+
+--- t+0     open decision, absorbed as in part 2
+    absorbed - watcher still polling, firstmate never woken
+      triage log: absorbed stale (decision held, awaiting captain, age 12s): fleet:fm-api-shape
+      state: decision-held-marker=set wedge-timer-disarmed 
+
+  captain answers: appending 'resolved [key=api-shape]: go with PATCH' to the status log
+
+--- t+1s    decision closed - held tracking cleared, wedge timer re-armed
+    absorbed - watcher still polling, firstmate never woken
+      triage log: absorbed non-terminal stale (provably working): fleet:fm-api-shape
+      state: WEDGE-TIMER-ARMED(idle 11s) 
+
+--- t+4min  the crew is STILL mute after the answer
+    >>> FIRSTMATE WOKEN (watcher exited, one captain turn spent):
+          stale: fleet:fm-api-shape (idle 500s, possible wedge, escalation 1)
+      triage log: absorbed non-terminal stale (provably working): fleet:fm-api-shape
+      state: wedge-timer-disarmed 
+      captain queue: 1786906165	1	stale	fleet:fm-api-shape	stale: fleet:fm-api-shape (idle 500s, possible wedge, escalation 1)
+
+===============================================================================
+PART 5 - THIS BRANCH: a crew with no open decision wedges exactly like today
+
+--- t+0     first sight - normal absorb, wedge timer armed
+    absorbed - watcher still polling, firstmate never woken
+      triage log: absorbed non-terminal stale (provably working): fleet:fm-api-shape
+      state: WEDGE-TIMER-ARMED(idle 13s) 
+
+--- t+4min  no open decision -> wedge escalation, unchanged
+    >>> FIRSTMATE WOKEN (watcher exited, one captain turn spent):
+          stale: fleet:fm-api-shape (idle 500s, possible wedge, escalation 1)
+      triage log: absorbed non-terminal stale (provably working): fleet:fm-api-shape
+      state: wedge-timer-disarmed 
+      captain queue: 1786906181	1	stale	fleet:fm-api-shape	stale: fleet:fm-api-shape (idle 500s, possible wedge, escalation 1)
+
+===============================================================================
+DONE
