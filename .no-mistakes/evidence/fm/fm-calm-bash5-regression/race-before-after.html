@@ -1,0 +1,95 @@
+<!doctype html>
+<html lang="fr"><meta charset="utf-8"><title>La course reproduite - cas adjacent</title>
+<style>
+ * { box-sizing:border-box; }
+ body { background:#0f1319; color:#c9d1d9; font-family:-apple-system,BlinkMacSystemFont,sans-serif; margin:0; padding:26px 30px 32px; }
+ h1 { font-size:19px; font-weight:650; color:#e6edf3; margin:0 0 6px; letter-spacing:-.2px; }
+ p.lede { font-size:13.5px; color:#8b949e; margin:0 0 22px; max-width:1500px; line-height:1.55; }
+ .grid { display:grid; grid-template-columns:minmax(0,1fr) minmax(0,1fr); gap:18px; }
+ .card { min-width:0; border:1px solid #2a313c; border-radius:10px; overflow:hidden; background:#141922; }
+ .card.bad { border-color:#7f2f2a; }
+ .card.good { border-color:#2f6b46; }
+ .hd { padding:11px 15px; font-size:13px; font-weight:600; border-bottom:1px solid #2a313c; display:flex; gap:10px; align-items:baseline; }
+ .bad .hd { background:#2a1614; color:#f3b3ad; }
+ .good .hd { background:#12251b; color:#a9dcc0; }
+ .hd .tag { font-size:11px; font-weight:600; padding:2px 7px; border-radius:20px; }
+ .bad .tag { background:#7f2f2a; color:#ffe3e0; }
+ .good .tag { background:#2f6b46; color:#e2f7ea; }
+ .note { padding:9px 15px; font-size:12.5px; color:#9aa4b2; border-bottom:1px solid #222833; line-height:1.5; }
+ .term { background:#090c11; padding:12px 14px; overflow-x:auto; font-family:"SFMono-Regular",Menlo,Consolas,monospace;
+          font-size:10.5px; line-height:1.4; white-space:pre; min-height:330px; }
+ code { background:#1b212b; padding:1px 5px; border-radius:4px; font-size:12px; }
+ table { border-collapse:collapse; margin-top:24px; font-size:13px; }
+ th,td { text-align:left; padding:7px 16px 7px 0; border-bottom:1px solid #222833; }
+ th { color:#8b949e; font-weight:600; }
+ .ko { color:#f0857d; font-weight:600; } .okc { color:#7ee2a8; font-weight:600; }
+</style>
+<h1>La course reproduite : le pane etait vierge, pas duplique</h1>
+<p class="lede">Version pre-correctif du test (<code>ef35d79</code>), cas <code>adjacent</code>, run en echec sous l'interpreteur 5.3.15.
+A gauche, l'ecran exact que le test avait en main quand il a compte les reponses du capitaine et conclu a un doublon ;
+a droite, le meme ecran 50 ms plus tard. Le compte relevait <strong>0</strong> occurrence, jamais 2 : Pi ecrit le fichier de session
+avant de peindre le transcript, et le test capturait des que ce fichier se stabilisait. Le correctif ancre la capture sur la reponse de suivi.</p>
+<div class="grid">
+  <div class="card bad">
+    <div class="hd"><span class="tag">avant</span> Pane capture par le test pre-correctif <span style="color:#8b949e;font-weight:400">- 0x CAPTAIN_ANSWER_adjacent</span></div>
+    <div class="note">Aucune ligne de transcript : Pi en est encore a son ecran de demarrage. Le test annonce pourtant
+      <em>&laquo; rendered a duplicate captain answer &raquo;</em>.</div>
+    <div class="term">
+ pi v0.84.2
+ escape interrupt · ctrl+c/ctrl+d clear/exit · / commands · ! bash · ctrl+o more
+ Press ctrl+o to show full startup help and loaded resources.
+
+ Pi can explain its own features and look up its docs. Ask it how to use or extend Pi.
+
+[Extensions]
+  fm-calm.ts, followup-e2e.ts
+
+
+ Warning: tmux extended-keys is off. Modified Enter keys may not work. Add `set -g extended-keys on` to ~/.tmux.conf and restart tmux.
+
+────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+
+────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+/private/var/folders/5q/snmnm0_926ddy6xlmggzx1g80000gn/T/fm-calm-pi-extension.uML60T/followup-project (master)
+0.0%/4.1k (auto)                                                                                                                                   deterministic</div>
+  </div>
+  <div class="card good">
+    <div class="hd"><span class="tag">50 ms plus tard</span> Le meme pane <span style="color:#8b949e;font-weight:400">- 1x CAPTAIN_ANSWER_adjacent</span></div>
+    <div class="note">Le transcript est peint : prompt et reponse du capitaine une seule fois, reponse de suivi presente,
+      lignes operationnelles masquees par Calm absentes.</div>
+    <div class="term"><span></span>
+<span> </span><span style="font-weight:600"></span><span style="color:#8abeb7;font-weight:600">pi</span><span></span><span style="color:#666666"> v0.84.2</span><span></span>
+<span> </span><span style="color:#666666">escape</span><span style="color:#808080"> interrupt · </span><span style="color:#666666">ctrl+c/ctrl+d</span><span style="color:#808080"> clear/exit · </span><span style="color:#666666">/</span><span style="color:#808080"> commands · </span><span style="color:#666666">!</span><span style="color:#808080"> bash · </span><span style="color:#666666">ctrl+o</span><span style="color:#808080"> more</span><span></span>
+<span> </span><span style="color:#666666">Press ctrl+o to show full startup help and loaded resources.</span><span></span>
+<span></span>
+<span> </span><span style="color:#666666">Pi can explain its own features and look up its docs. Ask it how to use or extend Pi.</span><span></span>
+<span></span>
+<span></span><span style="color:#f0c674">[Extensions]</span><span></span>
+<span></span><span style="color:#666666">  fm-calm.ts, followup-e2e.ts</span><span></span>
+<span></span>
+<span></span>
+<span> </span><span style="color:#ffff00">Warning: tmux extended-keys is off. Modified Enter keys may not work. Add `set -g extended-keys on` to ~/.tmux.conf and restart tmux.</span><span></span>
+<span></span>
+<span></span><span style="background:#343541"></span>
+<span> </span><span style="color:#d4d4d4">CAPTAIN_PROMPT_adjacent</span><span></span>
+<span></span>
+<span></span>
+<span></span><span> CAPTAIN_ANSWER_adjacent</span>
+<span></span>
+<span> MONITOR_HANDLED_adjacent_ONE_TWO</span>
+<span></span>
+<span></span><span style="color:#505050">────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────</span>
+<span></span><span></span><span> </span><span></span>
+<span></span><span style="color:#505050">────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────</span>
+<span></span><span style="color:#666666">/private/var/folders/5q/snmnm0_926ddy6xlmggzx1g80000gn/T/fm-calm-pi-extension.uML60T/followup-project (master)</span><span></span>
+<span></span><span style="color:#666666">1.1%/4.1k (auto)                                                                                                                                   deterministic</span></div>
+  </div>
+</div>
+<table>
+ <tr><th>Mesure</th><th>Interpreteur 3.2.57</th><th>Interpreteur 5.3.15</th></tr>
+ <tr><td>test_operational_followup_turn_e2e, version pre-correctif</td><td class="ko">10/12 verts</td><td class="ko">11/12 verts</td></tr>
+ <tr><td>test_operational_followup_turn_e2e, version corrigee (HEAD)</td><td class="okc">12/12 verts</td><td class="okc">12/12 verts</td></tr>
+ <tr><td>Suite complete a HEAD</td><td class="okc">3/3 verts, 12 verifications, 0 skip</td><td class="okc">3/3 verts, 12 verifications, 0 skip</td></tr>
+ <tr><td>Doublon reel injecte dans le fixture (HEAD)</td><td class="ko">3/3 echecs attendus</td><td class="ko">3/3 echecs attendus</td></tr>
+</table>
+</html>

@@ -1,0 +1,14 @@
+ pi v0.84.2
+ escape interrupt · ctrl+c/ctrl+d clear/exit · / commands · ! bash · ctrl+o more
+ Press ctrl+o to show full startup help and loaded resources.
+ Pi can explain its own features and look up its docs. Ask it how to use or extend Pi.
+[Extensions]
+  fm-calm.ts, followup-e2e.ts
+ Warning: tmux extended-keys is off. Modified Enter keys may not work. Add `set -g extended-keys on` to ~/.tmux.conf and restart tmux.
+ CAPTAIN_PROMPT_adjacent
+ CAPTAIN_ANSWER_adjacent
+ MONITOR_HANDLED_adjacent_ONE_TWO
+────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+/private/var/folders/5q/snmnm0_926ddy6xlmggzx1g80000gn/T/fm-calm-pi-extension.vuZ3Pp/followup-project (master)
+1.1%/4.1k (auto)                                                                                                                                   deterministic

@@ -1,0 +1,8 @@
+=== Mutation: le fixture emet une VRAIE reponse capitaine dupliquee a l'ecran ===
+But: verifier que la nouvelle attente (ancre sur MONITOR_HANDLED_<label>_ONE) ne masque pas un doublon reel.
+bash 3.2.57(1)-release run 1 -> exit 1 | not ok - Pi follow-up adjacent case rendered a duplicate captain answer
+bash 3.2.57(1)-release run 2 -> exit 1 | not ok - Pi follow-up adjacent case rendered a duplicate captain answer
+bash 3.2.57(1)-release run 3 -> exit 1 | not ok - Pi follow-up adjacent case rendered a duplicate captain answer
+bash 5.3.15(1)-release run 1 -> exit 1 | not ok - Pi follow-up adjacent case rendered a duplicate captain answer
+bash 5.3.15(1)-release run 2 -> exit 1 | not ok - Pi follow-up adjacent case rendered a duplicate captain answer
+bash 5.3.15(1)-release run 3 -> exit 1 | not ok - Pi follow-up adjacent case rendered a duplicate captain answer

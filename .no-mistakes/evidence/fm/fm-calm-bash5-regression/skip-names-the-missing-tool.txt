@@ -1,0 +1,13 @@
+=== Ce que la suite annonce selon l'outil E2E reellement absent (bash 3.2.57) ===
+--- tmux absent, pi present ---
+skip: tmux not found for Pi operational follow-up E2E
+skip: tmux not found for Pi Calm hidden-block geometry E2E
+skip: tmux not found for Pi calm interactive E2E
+--- pi absent, tmux present ---
+skip: pi not found for Pi operational follow-up E2E
+skip: pi not found for Pi Calm hidden-block geometry E2E
+skip: pi not found for Pi calm interactive E2E
+--- pi et tmux absents ---
+skip: pi and tmux not found for Pi operational follow-up E2E
+skip: pi and tmux not found for Pi Calm hidden-block geometry E2E
+skip: pi and tmux not found for Pi calm interactive E2E

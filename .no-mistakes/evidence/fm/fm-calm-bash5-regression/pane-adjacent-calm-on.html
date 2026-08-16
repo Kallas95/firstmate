@@ -1,0 +1,43 @@
+<!doctype html>
+<html lang="fr"><meta charset="utf-8">
+<title>Pane Pi reel - cas adjacent, Calm actif</title>
+<style>
+ body { background:#12151a; color:#c9d1d9; font-family:-apple-system,BlinkMacSystemFont,sans-serif; margin:0; padding:28px; }
+ h1 { font-size:16px; font-weight:600; color:#e6edf3; margin:0 0 4px; }
+ p.sub { font-size:13px; color:#8b949e; margin:0 0 18px; max-width:1100px; line-height:1.5; }
+ .term { background:#0b0e12; border:1px solid #2a313c; border-radius:8px; padding:16px 18px; overflow-x:auto;
+          font-family:"SFMono-Regular",Menlo,Consolas,monospace; font-size:12.5px; line-height:1.45; white-space:pre; }
+ code { background:#1b212b; padding:1px 5px; border-radius:4px; font-size:12px; }
+</style>
+<h1>Ecran Pi reellement asserte - cas <code>adjacent</code>, Calm actif</h1>
+<p class="sub">Capture du pane tmux (<code>capture-pane -e</code>) prise au point exact ou <code>run_followup_case</code>
+evalue ses assertions, apres la nouvelle attente sur la reponse de suivi. Le prompt et la reponse du capitaine sont
+visibles une seule fois, la reponse de suivi est peinte, et les lignes operationnelles masquees par Calm sont absentes.
+C'est cet ecran, deja peint, que la version pre-correctif pouvait capturer encore a son etat de demarrage.</p>
+<div class="term"><span></span>
+<span> </span><span style="font-weight:600"></span><span style="color:#8abeb7;font-weight:600">pi</span><span></span><span style="color:#666666"> v0.84.2</span><span></span>
+<span> </span><span style="color:#666666">escape</span><span style="color:#808080"> interrupt · </span><span style="color:#666666">ctrl+c/ctrl+d</span><span style="color:#808080"> clear/exit · </span><span style="color:#666666">/</span><span style="color:#808080"> commands · </span><span style="color:#666666">!</span><span style="color:#808080"> bash · </span><span style="color:#666666">ctrl+o</span><span style="color:#808080"> more</span><span></span>
+<span> </span><span style="color:#666666">Press ctrl+o to show full startup help and loaded resources.</span><span></span>
+<span></span>
+<span> </span><span style="color:#666666">Pi can explain its own features and look up its docs. Ask it how to use or extend Pi.</span><span></span>
+<span></span>
+<span></span><span style="color:#f0c674">[Extensions]</span><span></span>
+<span></span><span style="color:#666666">  fm-calm.ts, followup-e2e.ts</span><span></span>
+<span></span>
+<span></span>
+<span> </span><span style="color:#ffff00">Warning: tmux extended-keys is off. Modified Enter keys may not work. Add `set -g extended-keys on` to ~/.tmux.conf and restart tmux.</span><span></span>
+<span></span>
+<span></span><span style="background:#343541"></span>
+<span> </span><span style="color:#d4d4d4">CAPTAIN_PROMPT_adjacent</span><span></span>
+<span></span>
+<span></span>
+<span></span><span> CAPTAIN_ANSWER_adjacent</span>
+<span></span>
+<span> MONITOR_HANDLED_adjacent_ONE_TWO</span>
+<span></span>
+<span></span><span style="color:#505050">────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────</span>
+<span></span><span></span><span> </span><span></span>
+<span></span><span style="color:#505050">────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────</span>
+<span></span><span style="color:#666666">/private/var/folders/5q/snmnm0_926ddy6xlmggzx1g80000gn/T/fm-calm-pi-extension.p7F2fy/followup-project (master)</span><span></span>
+<span></span><span style="color:#666666">1.1%/4.1k (auto)                                                                                                                                   deterministic</span></div>
+</html>

@@ -1,0 +1,22 @@
+=== tests/fm-calm-pi-extension.test.sh, suite complete a HEAD (adce327) ===
+bash 3.2.57(1)-release | run 2 | exit 0 | 12 verifications | 0 skip | 0 echec
+bash 3.2.57(1)-release | run 3 | exit 0 | 12 verifications | 0 skip | 0 echec
+bash 5.3.15(1)-release | run 2 | exit 0 | 12 verifications | 0 skip | 0 echec
+bash 5.3.15(1)-release | run 3 | exit 0 | 12 verifications | 0 skip | 0 echec
+
+--- run 1 (deja mesure plus haut, meme configuration) ---
+bash 3.2.57 | run 1 | exit 0 | 12 verifications | 0 skip
+bash 5.3.15 | run 1 | exit 0 | 12 verifications | 0 skip
+
+=== meme suite avec un PATH prive de /opt/homebrew/bin (le 'controle propre' de la mesure d'origine) ===
+tmux vit dans /opt/homebrew/bin, donc les 3 E2E sont skippes et le skip nomme desormais l'outil absent :
+--- bash 3.2.57, exit 0 ---
+skip: tmux not found for Pi operational follow-up E2E
+skip: tmux not found for Pi Calm hidden-block geometry E2E
+skip: tmux not found for Pi calm interactive E2E
+verifications reellement executees: 9 (9 = les 12 de la suite moins les 3 E2E skippes)
+--- bash 5.3.15, exit 0 ---
+skip: tmux not found for Pi operational follow-up E2E
+skip: tmux not found for Pi Calm hidden-block geometry E2E
+skip: tmux not found for Pi calm interactive E2E
+verifications reellement executees: 9

@@ -1,0 +1,9 @@
+=== Version PRE-FIX instrumentee: que contient reellement le pane quand le test annonce un 'duplicate captain answer' ? ===
+--- echec 1 (bash 5.3.15(1)-release, run 6) ---
+DIAG cas=adjacent | CAPTAIN_ANSWER dans le pane capture=0 | 50ms plus tard=1 | MONITOR_HANDLED dans le pane capture=0 | 50ms plus tard=1
+DIAG premieres lignes non vides du pane capture:  pi v0.84.2| escape interrupt · ctrl+c/ctrl+d clear/exit · / commands · ! bash · ctrl+o more| Press ctrl+o to show full startup help and loaded resources.| Pi can explain its own features and look up its docs. Ask it how to use or extend Pi.|
+not ok - Pi follow-up adjacent case rendered a duplicate captain answer
+--- echec 2 (bash 3.2.57(1)-release, run 15) ---
+DIAG cas=adjacent | CAPTAIN_ANSWER dans le pane capture=0 | 50ms plus tard=1 | MONITOR_HANDLED dans le pane capture=0 | 50ms plus tard=1
+DIAG premieres lignes non vides du pane capture:  pi v0.84.2| escape interrupt · ctrl+c/ctrl+d clear/exit · / commands · ! bash · ctrl+o more| Press ctrl+o to show full startup help and loaded resources.| Pi can explain its own features and look up its docs. Ask it how to use or extend Pi.|
+not ok - Pi follow-up adjacent case rendered a duplicate captain answer
