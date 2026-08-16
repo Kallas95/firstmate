@@ -1,0 +1,1 @@
+{"hooks":{"PreToolUse":[{"matcher":"*","hooks":[{"type":"command","command":"test -x  || { printf '%s\\n'  >&2; exit 2; }; exec  --claude"}]}]}}

@@ -74,6 +74,22 @@ matrix_case D29 deny remote-transfer '$(ssh build-host uptime)'
 matrix_case D30 deny permission-change 'echo $(chmod 777 /etc/passwd)'
 matrix_case D31 deny remote-transfer 'env -S "ssh build-host uptime"'
 matrix_case D32 deny dotenv-access 'cp -t /tmp/stash .env'
+# A copy's destination can leave the trailing operand through any spelling of the
+# target-directory option, and every remaining operand is then a source.
+matrix_case D33 deny dotenv-access 'cp -rt /tmp/exfil .env'
+matrix_case D34 deny dotenv-access 'mv -ft /tmp .env'
+matrix_case D35 deny dotenv-access 'cp -t/tmp .env'
+matrix_case D36 deny dotenv-access 'cp --target-directory=/tmp .env'
+# A compound command's body is introduced by a reserved word, so it must be
+# classified exactly like the same command written on its own. These are the
+# shapes a wandering worker writes spontaneously, not evasion idioms.
+matrix_case D37 deny permission-change 'for f in *.sh; do chmod +x $f; done'
+matrix_case D38 deny protected-branch-push 'if [ -f x ]; then git push origin main; fi'
+matrix_case D39 deny dotenv-access 'for f in a; do cat .env; done'
+matrix_case D40 deny history-rewrite 'until false; do git rebase main; done'
+matrix_case D41 deny permission-change 'time chmod +x a'
+matrix_case D42 deny remote-transfer 'while read -r h; do ssh "$h" uptime; done'
+matrix_case D43 deny privilege-escalation 'if true; then ! sudo id; fi'
 
 # ALLOW: ordinary worker work, including the push form the delivery path needs.
 matrix_case A01 allow - 'git push origin HEAD'
@@ -98,6 +114,13 @@ matrix_case A16 allow - 'echo "see https://github.com/example/repo'
 # is ordinary bootstrap work, so only a .env SOURCE is refused.
 matrix_case A17 allow - 'cp .env.example .env'
 matrix_case A18 allow - 'echo "KEY=local" > .env'
+# Dropping the reserved word must not start refusing a compound command whose
+# body holds nothing inside the perimeter, nor a reserved word used as data.
+matrix_case A19 allow - 'for f in *.md; do wc -l $f; done'
+matrix_case A20 allow - 'if [ -f package.json ]; then npm test; fi'
+matrix_case A21 allow - 'echo "run do and done and time here"'
+matrix_case A22 allow - 'grep -rn done src/'
+matrix_case A23 allow - 'cp -r src/config .env.example'
 
 MATRIX_TMP=$(mktemp -d "${TMPDIR:-/tmp}/fm-worker-guard-matrix.XXXXXX")
 FM_TEST_CLEANUP_DIRS+=("$MATRIX_TMP")

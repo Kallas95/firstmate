@@ -20,7 +20,7 @@
 // bodies blocks this repo's own test suite (which legitimately chmods fixtures)
 // and any project's build scripts, so a worker's own scripts stay out of scope.
 
-import { Lexer, splitProgram, commandPosition } from "./fm-arm-command-policy.mjs";
+import { Lexer, splitProgram, commandPosition, SHELL_RESERVED_WORDS } from "./fm-arm-command-policy.mjs";
 import { realpathSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 
@@ -63,7 +63,13 @@ const COPYING_COMMANDS = new Set(["cp", "mv", "install", "ln", "tee", "rsync", "
 
 // Options that move a copy's destination out of the trailing operand, so every
 // remaining operand is a source: `cp -t /tmp .env` copies the secret out too.
-const TARGET_DIRECTORY_OPTION = /^(?:-t|--target-directory(?:=.*)?)$/;
+// A short target-directory option carries its value attached to the cluster
+// (`-t/tmp`, `-rt/tmp`) or in the next token (`-t /tmp`, `-rt /tmp`), and it may
+// sit anywhere inside a cluster, so all of those spellings are recognized: a
+// spelling read as an ordinary flag would put the destination back on the
+// trailing operand and let a secret out as a source.
+const TARGET_DIRECTORY_SHORT = /^-[A-Za-z]*?t(.*)$/;
+const TARGET_DIRECTORY_LONG = /^--target-directory(?:=(.*))?$/;
 
 // Redirections that make the shell READ the named file. `> .env` and `>> .env`
 // write a file and expose nothing; `<<` and `<<<` name a delimiter or a string
@@ -119,9 +125,13 @@ function copySourceOperands(args) {
   let destinationIsTrailing = true;
   for (let index = 0; index < args.length; index += 1) {
     const value = args[index];
-    if (TARGET_DIRECTORY_OPTION.test(value)) {
+    const isLong = value.startsWith("--");
+    const target = isLong
+      ? TARGET_DIRECTORY_LONG.exec(value)
+      : (isOption(value) ? TARGET_DIRECTORY_SHORT.exec(value) : null);
+    if (target) {
       destinationIsTrailing = false;
-      if (value === "-t" || value === "--target-directory") index += 1;
+      if (isLong ? target[1] === undefined : !target[1]) index += 1;
       continue;
     }
     if (isOption(value)) continue;
@@ -198,6 +208,22 @@ function redirectionReadsDotenv(tokens) {
   return false;
 }
 
+// A compound command's body arrives as a node introduced by the reserved word
+// that opened it - `do chmod +x $f`, `then git push origin main`, `time chmod
+// +x a`. commandPosition would read that keyword as the executed command and
+// never reach the body, so the keywords are dropped and the remainder is
+// classified exactly like the same command written on its own. `!` leads the
+// same way, negating the command that follows it rather than being one.
+function withoutLeadingKeywords(tokens) {
+  let start = 0;
+  while (tokens[start]?.type === "word") {
+    const value = tokens[start].value;
+    if (value !== "!" && !SHELL_RESERVED_WORDS.has(basename(value))) break;
+    start += 1;
+  }
+  return start === 0 ? tokens : tokens.slice(start);
+}
+
 // The payload of `sh -c '<program>'`, or "" when this is not such an invocation.
 function shellPayload(position) {
   const words = position.words;
@@ -228,7 +254,7 @@ function classifyCommand(command, depth) {
     // node runs the command just as surely as a top-level one.
     if (redirectionReadsDotenv(node)) return deny("dotenv-access");
 
-    const position = commandPosition(node);
+    const position = commandPosition(withoutLeadingKeywords(node));
 
     // A nested program runs whatever it contains, so every place the shared
     // lexer parks one is classified against the same perimeter: subshells and
