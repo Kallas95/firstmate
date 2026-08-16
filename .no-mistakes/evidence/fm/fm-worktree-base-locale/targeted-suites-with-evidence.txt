@@ -1,0 +1,61 @@
+FM_TEST_BEGIN 2026-08-16T13:15:08Z tests/fm-spawn-pool-base-freshen.test.sh family=unclassified expected_gate_skip=none
+# observed spawn: spawned pool-current-base-r1 harness=codex kind=ship mode=no-mistakes yolo=off window=firstmate:fm-pool-current-base-r1 worktree=/var/folders/5q/snmnm0_926ddy6xlmggzx1g80000gn/T//fm-spawn-pool-base-freshen.73KGZv/current-base/pool
+# observed base: HEAD=92005d19532a1b305c1cbb3d18ec701b9b358f1f origin/main=92005d19532a1b305c1cbb3d18ec701b9b358f1f advanced-main=must survive a newly spawned branch
+ok - a stale pooled worktree refreshes to current origin/main before a crew branch is created
+ok - a stale pooled worktree resolves and refreshes a non-main default branch
+# observed direct-pr spawn: spawned pool-direct-pr-r3 harness=codex kind=ship mode=direct-PR yolo=off window=firstmate:fm-pool-direct-pr-r3 worktree=/var/folders/5q/snmnm0_926ddy6xlmggzx1g80000gn/T//fm-spawn-pool-base-freshen.73KGZv/direct-pr/pool
+# observed scout spawn: spawned pool-scout-r3 harness=codex kind=scout window=firstmate:fm-pool-scout-r3 worktree=/var/folders/5q/snmnm0_926ddy6xlmggzx1g80000gn/T//fm-spawn-pool-base-freshen.73KGZv/scout/pool
+ok - direct-PR ships and scouts both refresh stale pooled worktrees before launch
+# observed dirty refusal: error: pooled worktree '/var/folders/5q/snmnm0_926ddy6xlmggzx1g80000gn/T//fm-spawn-pool-base-freshen.73KGZv/dirty-refusal/pool' is not clean; refusing to discard uncommitted work while refreshing its base; preserved=keep this local work
+ok - a dirty pooled worktree is refused without discarding its local work
+# observed unresolved-default refusal: error: could not resolve origin's current default branch for pooled worktree '/var/folders/5q/snmnm0_926ddy6xlmggzx1g80000gn/T//fm-spawn-pool-base-freshen.73KGZv/unresolved-default/pool'; refusing to launch from a potentially stale base
+ok - an unresolved remote default branch refuses the pooled worktree
+# observed unreachable-origin refusal: error: could not fetch origin for pooled worktree '/var/folders/5q/snmnm0_926ddy6xlmggzx1g80000gn/T//fm-spawn-pool-base-freshen.73KGZv/unreachable-origin/pool'; refusing to launch from a potentially stale base
+ok - an unreachable origin refuses a potentially stale pooled worktree
+# observed divergence warning: warning: local main is 1 commit(s) ahead of origin/main; this worker starts from origin/main (correct for an upstream PR), so landing its branch locally will need 'git merge main' inside the branch first
+ok - a local default branch ahead of origin warns at spawn without moving the base off origin's tip
+# all fm-spawn-pool-base-freshen tests passed
+FM_TEST_END 2026-08-16T13:15:28Z tests/fm-spawn-pool-base-freshen.test.sh exit=0 duration_ms=20220 gate_skip=false
+FM_TEST_BEGIN 2026-08-16T13:15:28Z tests/fm-merge-local.test.sh family=pr-forge expected_gate_skip=none
+# observed clean landing: merged fm/merge-local-clean-r1 into local main (3a6c8f4 -> 066c737) in /var/folders/5q/snmnm0_926ddy6xlmggzx1g80000gn/T//fm-merge-local.0nd8eG/clean/project
+ok - a landing that drops nothing still fast-forwards with no added friction
+# observed refusal:
+●━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+●  WATCHER DOWN - SUPERVISION IS OFF
+●  1 task(s) in flight, but no watcher has a fresh beacon (last beat: never, grace 300s).
+●  Trust the emitted supervision protocol for this harness; do not use shell & for watcher repair.
+●  This is a supervision warning only; the guarded operation WILL still run.
+●  watcher supervision needs Stop-owned automatic recovery; inspect the hook registration and startup status before ending the turn.
+●━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+REFUSED: landing fm/merge-local-trap-r2 would drop 1 commit(s) that exist only on local main:
+  9bf84a0 adopt upstream PR #1234 locally
+fm/merge-local-trap-r2 was cut from origin/main, so it never contained them.
+Reconcile first: run 'git merge main' inside fm/merge-local-trap-r2 (in its own worktree), resolve any conflicts, then retry this merge.
+If dropping those commits is genuinely intended, re-run with --drop-local-commits (destructive; needs the captain's explicit word).
+ok - a landing that would erase a local commit is refused, naming the commit and the fix
+ok - the reconciliation the refusal names makes the same landing pass
+# observed escape hatch:
+●━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+●  WATCHER DOWN - SUPERVISION IS OFF
+●  1 task(s) in flight, but no watcher has a fresh beacon (last beat: never, grace 300s).
+●  Trust the emitted supervision protocol for this harness; do not use shell & for watcher repair.
+●  This is a supervision warning only; the guarded operation WILL still run.
+●  watcher supervision needs Stop-owned automatic recovery; inspect the hook registration and startup status before ending the turn.
+●━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+DROPPING 1 local-only commit(s) from main as explicitly authorized:
+  89a83847bf0987970e2d974be2615b99e8b5e432 adopt upstream PR #1234 locally
+recorded in /var/folders/5q/snmnm0_926ddy6xlmggzx1g80000gn/T//fm-merge-local.0nd8eG/escape/home/state/merge-local-escape-r4.local-merge-drop; rescue ref refs/fm-dropped/merge-local-escape-r4/89a8384 now holds main's pre-reset tip, so those commits stay in /var/folders/5q/snmnm0_926ddy6xlmggzx1g80000gn/T//fm-merge-local.0nd8eG/escape/project (not just in the reflog) and stay recoverable by full SHA
+release this drop's commits for good with: git -C /var/folders/5q/snmnm0_926ddy6xlmggzx1g80000gn/T//fm-merge-local.0nd8eG/escape/project update-ref -d refs/fm-dropped/merge-local-escape-r4/89a8384 (other drops keep their own ref)
+reset local main to fm/merge-local-escape-r4 (89a8384 -> cb6723f) in /var/folders/5q/snmnm0_926ddy6xlmggzx1g80000gn/T//fm-merge-local.0nd8eG/escape/project
+ok - the escape hatch drops only when asked, prints what it dropped, and records recoverable SHAs
+ok - the escape hatch never turns a clean landing into a reset
+ok - dropped commits are held by a rescue ref that outlives the reflog, and the documented release frees them
+ok - successive drops on one task each keep their own rescue ref, and neither release is forced by the other
+ok - re-dropping a tip a rescue ref already holds keeps that ref and says so
+# all fm-merge-local tests passed
+FM_TEST_END 2026-08-16T13:15:31Z tests/fm-merge-local.test.sh exit=0 duration_ms=3222 gate_skip=false
+FM_TEST_SUMMARY total=2 failed=0 skipped_gate=0 duration_ms=23524
+FM_TEST_SUMMARY_FAMILY family=pr-forge count=1 duration_ms=3222 failed=0
+FM_TEST_SUMMARY_FAMILY family=unclassified count=1 duration_ms=20220 failed=0
+FM_TEST_SLOWEST rank=1 script=tests/fm-spawn-pool-base-freshen.test.sh duration_ms=20220
+FM_TEST_SLOWEST rank=2 script=tests/fm-merge-local.test.sh duration_ms=3222

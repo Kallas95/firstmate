@@ -1,0 +1,204 @@
+
+== SCENE 1 - the measured shape: local main = upstream + N local adoptions
+
+$ git -C /var/folders/5q/snmnm0_926ddy6xlmggzx1g80000gn/T//fm-landing-demo.z8NISN/trap/projects/firstmate log --oneline --decorate -3 main
+331f69b (HEAD -> main) adopt upstream PR #2456 locally (secondmate recovery hint)
+7b44116 adopt upstream PR #2461 locally (calm export confirmation)
+d88bbe4 (origin/main, origin/HEAD) upstream: initial
+
+$ git -C /var/folders/5q/snmnm0_926ddy6xlmggzx1g80000gn/T//fm-landing-demo.z8NISN/trap/projects/firstmate log --oneline origin/main..main
+331f69b adopt upstream PR #2456 locally (secondmate recovery hint)
+7b44116 adopt upstream PR #2461 locally (calm export confirmation)
+
+== the worker branch was cut from origin/main, so it does not contain them
+
+$ git -C /var/folders/5q/snmnm0_926ddy6xlmggzx1g80000gn/T//fm-landing-demo.z8NISN/trap/projects/firstmate log --oneline origin/main..fm/fix-calm-a1
+f3f998a feat(bin): the work the crewmate was sent to do
+
+== the manual check that caught this four times in two days:
+
+$ git -C /var/folders/5q/snmnm0_926ddy6xlmggzx1g80000gn/T//fm-landing-demo.z8NISN/trap/projects/firstmate diff main..fm/fix-calm-a1 --stat
+ calm-export.txt   | 1 -
+ feature.txt       | 1 +
+ recovery-hint.txt | 1 -
+ 3 files changed, 1 insertion(+), 2 deletions(-)
+
+== SCENE 2 - BEFORE (base commit ef35d79): refused, but names nothing
+
+$ fm-merge-local.sh fix-calm-a1
+●━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+●  WATCHER DOWN - SUPERVISION IS OFF
+●  1 task(s) in flight, but no watcher has a fresh beacon (last beat: never, grace 300s).
+●  Trust the emitted supervision protocol for this harness; do not use shell & for watcher repair.
+●  This is a supervision warning only; the guarded operation WILL still run.
+●  watcher supervision needs Stop-owned automatic recovery; inspect the hook registration and startup status before ending the turn.
+●━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+REFUSED: fm/fix-calm-a1 is not a fast-forward of main (it has diverged).
+Have the crewmate rebase fm/fix-calm-a1 onto main, then retry.
+[exit 1]
+
+== SCENE 3 - AFTER (38bb5cd): refused, naming what would disappear and the fix
+
+$ fm-merge-local.sh fix-calm-a1
+WARNING: watcher still down (same stale episode; last beat: never, grace 300s) - full banner already printed this episode.
+REFUSED: landing fm/fix-calm-a1 would drop 2 commit(s) that exist only on local main:
+  331f69b adopt upstream PR #2456 locally (secondmate recovery hint)
+  7b44116 adopt upstream PR #2461 locally (calm export confirmation)
+fm/fix-calm-a1 was cut from origin/main, so it never contained them.
+Reconcile first: run 'git merge main' inside fm/fix-calm-a1 (in its own worktree), resolve any conflicts, then retry this merge.
+If dropping those commits is genuinely intended, re-run with --drop-local-commits (destructive; needs the captain's explicit word).
+[exit 1]
+
+== local main is untouched by the refusal, and no drop record was written:
+
+$ git -C /var/folders/5q/snmnm0_926ddy6xlmggzx1g80000gn/T//fm-landing-demo.z8NISN/trap/projects/firstmate log --oneline -1 main
+331f69b adopt upstream PR #2456 locally (secondmate recovery hint)
+
+$ ls /var/folders/5q/snmnm0_926ddy6xlmggzx1g80000gn/T//fm-landing-demo.z8NISN/trap/state
+fix-calm-a1.meta
+
+== SCENE 4 - the reconciliation the refusal names makes the same landing pass
+
+$ git -C /var/folders/5q/snmnm0_926ddy6xlmggzx1g80000gn/T//fm-landing-demo.z8NISN/trap/worker merge --no-edit main
+Merge made by the 'ort' strategy.
+ calm-export.txt   | 1 +
+ recovery-hint.txt | 1 +
+ 2 files changed, 2 insertions(+)
+ create mode 100644 calm-export.txt
+ create mode 100644 recovery-hint.txt
+
+$ fm-merge-local.sh fix-calm-a1
+WARNING: watcher still down (same stale episode; last beat: never, grace 300s) - full banner already printed this episode.
+merged fm/fix-calm-a1 into local main (331f69b -> 876d6ad) in /var/folders/5q/snmnm0_926ddy6xlmggzx1g80000gn/T//fm-landing-demo.z8NISN/trap/projects/firstmate
+
+== both the adoptions and the worker deliverable are on local main:
+
+$ git -C /var/folders/5q/snmnm0_926ddy6xlmggzx1g80000gn/T//fm-landing-demo.z8NISN/trap/projects/firstmate log --oneline -5 main
+876d6ad Merge branch 'main' into fm/fix-calm-a1
+f3f998a feat(bin): the work the crewmate was sent to do
+331f69b adopt upstream PR #2456 locally (secondmate recovery hint)
+d88bbe4 upstream: initial
+7b44116 adopt upstream PR #2461 locally (calm export confirmation)
+
+$ ls /var/folders/5q/snmnm0_926ddy6xlmggzx1g80000gn/T//fm-landing-demo.z8NISN/trap/projects/firstmate
+README.md
+calm-export.txt
+feature.txt
+recovery-hint.txt
+
+== SCENE 5 - a healthy landing keeps passing with no added friction
+
+$ fm-merge-local.sh ship-clean-b2
+●━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+●  WATCHER DOWN - SUPERVISION IS OFF
+●  1 task(s) in flight, but no watcher has a fresh beacon (last beat: never, grace 300s).
+●  Trust the emitted supervision protocol for this harness; do not use shell & for watcher repair.
+●  This is a supervision warning only; the guarded operation WILL still run.
+●  watcher supervision needs Stop-owned automatic recovery; inspect the hook registration and startup status before ending the turn.
+●━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+merged fm/ship-clean-b2 into local main (43d7501 -> 63775bd) in /var/folders/5q/snmnm0_926ddy6xlmggzx1g80000gn/T//fm-landing-demo.z8NISN/clean/projects/firstmate
+
+== and the escape hatch cannot silently turn a healthy landing into a reset:
+
+$ fm-merge-local.sh ship-clean-c3 --drop-local-commits
+●━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+●  WATCHER DOWN - SUPERVISION IS OFF
+●  1 task(s) in flight, but no watcher has a fresh beacon (last beat: never, grace 300s).
+●  Trust the emitted supervision protocol for this harness; do not use shell & for watcher repair.
+●  This is a supervision warning only; the guarded operation WILL still run.
+●  watcher supervision needs Stop-owned automatic recovery; inspect the hook registration and startup status before ending the turn.
+●━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+note: --drop-local-commits was unnecessary; fm/ship-clean-c3 already contains every local main commit
+merged fm/ship-clean-c3 into local main (43d7501 -> 63775bd) in /var/folders/5q/snmnm0_926ddy6xlmggzx1g80000gn/T//fm-landing-demo.z8NISN/clean2/projects/firstmate
+
+== SCENE 6 - the escape hatch: explicit, traced, recoverable
+
+$ fm-merge-local.sh --drop-local-commits fix-drop-d4
+●━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+●  WATCHER DOWN - SUPERVISION IS OFF
+●  1 task(s) in flight, but no watcher has a fresh beacon (last beat: never, grace 300s).
+●  Trust the emitted supervision protocol for this harness; do not use shell & for watcher repair.
+●  This is a supervision warning only; the guarded operation WILL still run.
+●  watcher supervision needs Stop-owned automatic recovery; inspect the hook registration and startup status before ending the turn.
+●━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+DROPPING 2 local-only commit(s) from main as explicitly authorized:
+  b4b46ab861c5d12cbfc481d54d09a43611fd79f3 adopt upstream PR #2456 locally (secondmate recovery hint)
+  3c1275df9fa02e3fa65eb7245fbd91123cfdfc6e adopt upstream PR #2461 locally (calm export confirmation)
+recorded in /var/folders/5q/snmnm0_926ddy6xlmggzx1g80000gn/T//fm-landing-demo.z8NISN/drop/state/fix-drop-d4.local-merge-drop; rescue ref refs/fm-dropped/fix-drop-d4/b4b46ab now holds main's pre-reset tip, so those commits stay in /var/folders/5q/snmnm0_926ddy6xlmggzx1g80000gn/T//fm-landing-demo.z8NISN/drop/projects/firstmate (not just in the reflog) and stay recoverable by full SHA
+release this drop's commits for good with: git -C /var/folders/5q/snmnm0_926ddy6xlmggzx1g80000gn/T//fm-landing-demo.z8NISN/drop/projects/firstmate update-ref -d refs/fm-dropped/fix-drop-d4/b4b46ab (other drops keep their own ref)
+reset local main to fm/fix-drop-d4 (b4b46ab -> fbb10f1) in /var/folders/5q/snmnm0_926ddy6xlmggzx1g80000gn/T//fm-landing-demo.z8NISN/drop/projects/firstmate
+
+== the record written before the branch moved:
+
+$ cat /var/folders/5q/snmnm0_926ddy6xlmggzx1g80000gn/T//fm-landing-demo.z8NISN/drop/state/fix-drop-d4.local-merge-drop
+# 2026-08-16T13:16:28Z fm-merge-local.sh --drop-local-commits
+task=fix-drop-d4
+project=/var/folders/5q/snmnm0_926ddy6xlmggzx1g80000gn/T//fm-landing-demo.z8NISN/drop/projects/firstmate
+default=main
+branch=fm/fix-drop-d4
+default_before=b4b46ab861c5d12cbfc481d54d09a43611fd79f3
+rescue_ref=refs/fm-dropped/fix-drop-d4/b4b46ab
+dropped=b4b46ab861c5d12cbfc481d54d09a43611fd79f3 adopt upstream PR #2456 locally (secondmate recovery hint)
+dropped=3c1275df9fa02e3fa65eb7245fbd91123cfdfc6e adopt upstream PR #2461 locally (calm export confirmation)
+
+$ git -C /var/folders/5q/snmnm0_926ddy6xlmggzx1g80000gn/T//fm-landing-demo.z8NISN/drop/projects/firstmate for-each-ref refs/fm-dropped/**
+b4b46ab861c5d12cbfc481d54d09a43611fd79f3 commit	refs/fm-dropped/fix-drop-d4/b4b46ab
+
+== the reflog is pruned away; the rescued commits survive anyway:
+
+$ git -C /var/folders/5q/snmnm0_926ddy6xlmggzx1g80000gn/T//fm-landing-demo.z8NISN/drop/projects/firstmate reflog expire --expire=now --expire-unreachable=now --all
+
+$ git -C /var/folders/5q/snmnm0_926ddy6xlmggzx1g80000gn/T//fm-landing-demo.z8NISN/drop/projects/firstmate gc --prune=now --quiet
+
+$ git -C /var/folders/5q/snmnm0_926ddy6xlmggzx1g80000gn/T//fm-landing-demo.z8NISN/drop/projects/firstmate log --oneline -2 b4b46ab861c5d12cbfc481d54d09a43611fd79f3
+b4b46ab adopt upstream PR #2456 locally (secondmate recovery hint)
+3c1275d adopt upstream PR #2461 locally (calm export confirmation)
+
+== recovery from the recorded SHA:
+
+$ git -C /var/folders/5q/snmnm0_926ddy6xlmggzx1g80000gn/T//fm-landing-demo.z8NISN/drop/projects/firstmate branch rescued-adoptions b4b46ab861c5d12cbfc481d54d09a43611fd79f3
+
+$ git -C /var/folders/5q/snmnm0_926ddy6xlmggzx1g80000gn/T//fm-landing-demo.z8NISN/drop/projects/firstmate log --oneline -3 rescued-adoptions
+b4b46ab adopt upstream PR #2456 locally (secondmate recovery hint)
+3c1275d adopt upstream PR #2461 locally (calm export confirmation)
+43d7501 upstream: initial
+
+== and the documented per-drop release really frees them:
+
+$ git -C /var/folders/5q/snmnm0_926ddy6xlmggzx1g80000gn/T//fm-landing-demo.z8NISN/drop/projects/firstmate branch -D rescued-adoptions
+Deleted branch rescued-adoptions (was b4b46ab).
+
+$ git -C /var/folders/5q/snmnm0_926ddy6xlmggzx1g80000gn/T//fm-landing-demo.z8NISN/drop/projects/firstmate update-ref -d refs/fm-dropped/fix-drop-d4/b4b46ab
+
+$ git -C /var/folders/5q/snmnm0_926ddy6xlmggzx1g80000gn/T//fm-landing-demo.z8NISN/drop/projects/firstmate reflog expire --expire=now --expire-unreachable=now --all
+
+$ git -C /var/folders/5q/snmnm0_926ddy6xlmggzx1g80000gn/T//fm-landing-demo.z8NISN/drop/projects/firstmate gc --prune=now --quiet
+
+$ git cat-file -e b4b46ab861c5d12cbfc481d54d09a43611fd79f3^{commit}   # after the release
+gone - released as documented
+
+== SCENE 7 - upstream-bound work is untouched
+
+== the guard is never even consulted for a task that ships through an upstream PR:
+
+$ fm-merge-local.sh ship-upstream-e5
+●━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+●  WATCHER DOWN - SUPERVISION IS OFF
+●  1 task(s) in flight, but no watcher has a fresh beacon (last beat: never, grace 300s).
+●  Trust the emitted supervision protocol for this harness; do not use shell & for watcher repair.
+●  This is a supervision warning only; the guarded operation WILL still run.
+●  watcher supervision needs Stop-owned automatic recovery; inspect the hook registration and startup status before ending the turn.
+●━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+error: task ship-upstream-e5 is mode=no-mistakes, not local-only; merge PR tasks with bin/fm-pr-merge.sh <id> <PR url> after approval
+[exit 1]
+
+== and the branch that upstream would see carries only the deliverable, no local adoption:
+
+$ git -C /var/folders/5q/snmnm0_926ddy6xlmggzx1g80000gn/T//fm-landing-demo.z8NISN/upstream/projects/firstmate log --oneline origin/main..fm/ship-upstream-e5
+4439cec feat(bin): the work the crewmate was sent to do
+
+$ git -C /var/folders/5q/snmnm0_926ddy6xlmggzx1g80000gn/T//fm-landing-demo.z8NISN/upstream/projects/firstmate diff --stat origin/main...fm/ship-upstream-e5
+ feature.txt | 1 +
+ 1 file changed, 1 insertion(+)
+
+lab kept at: /var/folders/5q/snmnm0_926ddy6xlmggzx1g80000gn/T//fm-landing-demo.z8NISN
