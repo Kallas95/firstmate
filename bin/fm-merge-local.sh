@@ -6,9 +6,10 @@
 # locally instead of via a GitHub PR). It is the one sanctioned exception to hard
 # rule #1 "never run state-changing git in projects/", and it is narrow: it only
 # runs for mode=local-only tasks, only after the captain approves (or yolo=on
-# auto-approves), and only as a clean fast-forward - it refuses a diverged branch
-# and names every local commit that landing it would drop. See AGENTS.md prime
-# directives, project management, and task lifecycle.
+# auto-approves), and only as a clean fast-forward unless the captain explicitly
+# takes the --drop-local-commits escape hatch below - otherwise it refuses any
+# landing that would drop a local commit and names every one of them. See
+# AGENTS.md prime directives, project management, and task lifecycle.
 #
 # The local-commit guard exists because a task worktree is always freshened from
 # origin's default-branch tip, never from the local default branch. On a project
@@ -19,11 +20,12 @@
 # them: `git merge <default>` inside the task branch.
 #
 # --drop-local-commits is the deliberate escape hatch for the case where losing
-# them IS the intent. It is never the default and never silent: it refuses unless
-# the guard actually triggered, prints every dropped commit, pins the pre-reset
-# tip of the default branch under refs/fm-dropped/<id>/<short-sha> and records
-# them in state/<id>.local-merge-drop before touching the branch, and then resets
-# the default branch to the task branch. That rescue ref is what makes the
+# them IS the intent. It is never the default and never silent: when the guard
+# did not trigger it drops nothing and says so rather than passing as a silent
+# no-op, and when it did it prints every dropped commit, pins the pre-reset tip
+# of the default branch under refs/fm-dropped/<id>/<short-sha> and records them
+# in state/<id>.local-merge-drop before touching the branch, and then resets the
+# default branch to the task branch. That rescue ref is what makes the
 # recorded SHAs recoverable: after the reset the dropped commits hang off nothing
 # else, and the reflog that would otherwise hold them expires
 # (gc.reflogExpireUnreachable, 30 days by default) and is then pruned by `git gc`.

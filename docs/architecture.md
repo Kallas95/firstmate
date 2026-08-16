@@ -162,10 +162,9 @@ Its header owns the exact refusal mechanics, while `tests/fm-spawn-pool-base-fre
 That base stays origin's tip even on a project whose local default branch is ahead of it, because a branch destined for an upstream PR must never carry local-only commits; the spawn only warns about the divergence.
 The cost of that choice lands later, when such a branch is merged into the local default branch, so `bin/fm-merge-local.sh` refuses any landing that would drop a commit the local default branch has and the task branch does not, names those commits, and points at the `git merge <default>` reconciliation inside the task branch.
 Its `--drop-local-commits` escape hatch exists for the case where losing them is the intent: never the default, never silent, recorded in `state/<id>.local-merge-drop` before the branch moves, and destructive enough to need the captain's explicit word.
-Recovery does not rest on the reflog, which expires and is then pruned by `git gc`: the drop pins the pre-reset tip under `refs/fm-dropped/<id>/<short-sha>` in the project before moving the branch, and refuses to move it if that ref cannot be planted.
-Keying that ref by the rescued tip rather than by the task lets successive drops on one task coexist, each holding its own commits.
-The dropped commits therefore stay in the project for as long as their ref does, which is also why releasing them is an explicit, per-drop act: `git update-ref -d refs/fm-dropped/<id>/<short-sha>`.
-Its header owns the exact mechanics, and `tests/fm-merge-local.test.sh` owns the regression coverage.
+Recovery does not rest on the reflog, which expires and is then pruned by `git gc`: the drop pins the pre-reset tip under its own `refs/fm-dropped/<id>/` rescue ref in the project before moving the branch, and refuses to move the branch when that ref cannot be planted.
+Dropped commits therefore stay in the project for as long as their ref does, so successive drops on one task coexist and releasing one is an explicit, per-drop act that leaves every other rescue alone.
+Its header owns the exact ref naming, drop record, and release command, and `tests/fm-merge-local.test.sh` owns the regression coverage.
 
 The firstmate repo has one extra exposure because it can dispatch crewmates to work on itself.
 Its operating checkout (`FM_ROOT`) and the disposable crewmate worktrees are all linked git worktrees of the same repository, so the valid discriminator is branch state, not whether the checkout is linked.
