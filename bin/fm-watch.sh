@@ -9,6 +9,12 @@
 # working signal is never silently swallowed. A declared external-wait pause is
 # the separate idle absorb case and re-surfaces only on its long bounded cadence,
 # although its initial no-verb status signal still surfaces in normal mode.
+# A crew whose task carries a still-open captain decision (a needs-decision/blocked
+# the keyed fold has not closed) is absorbed the same way: its inactivity is
+# explained by that open decision, not a wedge, so it re-surfaces on the same long
+# cadence instead of wedge-escalating every STALE_ESCALATE_SECS; when the decision
+# closes the normal wedge cadence resumes immediately, so a crew still mute after
+# the answer re-escalates.
 # While state/.afk exists, the daemon owns triage and this watcher queues and exits
 # on every wake. Printed reason lines:
 #   signal: <file>...      status/turn-end signals, surfaced when a listed status
@@ -369,6 +375,61 @@ clear_pause_tracking() {  # <window>
   key=${key//./_}
   clear_pause_state "$win"
   rm -f "$STATE/.stale-$key" "$STATE/.stale-since-$key" "$STATE/.wedge-escalations-$key"
+}
+
+# Absorb a stale pane whose inactivity is explained by a still-open captain
+# decision on its task (a needs-decision/blocked the fold has not closed), and
+# re-surface it once every PAUSE_RESURFACE_SECS for a recheck so it cannot rot
+# invisibly. This is the same long-cadence shape as handle_paused_stale, but
+# kept DISTINCT: a captain decision wait is not a self-resolving external
+# pause, so it uses its own markers (.decision-held-/.decision-resurfaced-) and
+# reason text and never touches the .paused-* flag. It replaces the wedge timer
+# that would otherwise re-escalate the same parked crew every
+# STALE_ESCALATE_SECS - the live 2026-08 case where a crew parked on a captain
+# decision fired a stale every four minutes, each costing a full firstmate turn
+# only to conclude "still waiting for the same decision". Called on any stale
+# poll whose task has an open unresolved decision, so it must be cheap: it NEVER
+# re-reads crew state and reuses the status-file mtime the fold already keys on
+# (the decision was opened by a needs-decision/blocked line; the file does not
+# change while the captain has not answered), so a churny idle pane cannot reset
+# the cadence. When the decision closes (a resolved/captain-held line lands),
+# the caller's task_has_open_decision check turns false, the caller runs
+# clear_decision_held_tracking, and the normal wedge cadence resumes from a
+# clean first-sight on the next poll - so a crew that stays mute AFTER the
+# answer is a real wedge and re-escalates exactly as before.
+handle_decision_held_stale() {  # <window> <task> <hash>
+  local win=$1 task=$2 h=$3 key statusf mtime age rf rf_age reason
+  key=$(printf '%s' "$win" | tr ':/.' '___')
+  printf '%s' "$h" > "$STATE/.stale-$key"
+  : > "$STATE/.decision-held-$key"
+  rm -f "$STATE/.stale-since-$key" "$STATE/.wedge-escalations-$key"
+  statusf="$STATE/$task.status"
+  mtime=$(stat_mtime "$statusf")
+  case "$mtime" in ''|*[!0-9]*) mtime=$(date +%s) ;; esac
+  age=$(( $(date +%s) - mtime ))
+  rf="$STATE/.decision-resurfaced-$key"
+  rf_age=$(age_of "$rf")   # 999999 when no prior re-surface
+  if [ "$age" -ge "$PAUSE_RESURFACE_SECS" ] && [ "$rf_age" -ge "$PAUSE_RESURFACE_SECS" ]; then
+    reason="stale: $win (decision held ${age}s, awaiting captain - rechecked on a long cadence not a wedge; confirm the decision is still open)"
+    fm_wake_append stale "$win" "$reason" || exit 1
+    date +%s > "$rf"
+    wake "$reason"
+  fi
+  triage_log "absorbed stale (decision held, awaiting captain, age ${age}s): $win"
+}
+
+# Clear decision-held tracking for <window>. Called by the stale triage when a
+# task's open decision has closed (task_has_open_decision turned false while a
+# .decision-held-<key> marker remained), so the normal wedge cadence resumes
+# from a clean first-sight on the next poll. Also resets the stale suppressor
+# and wedge timer so first-sight re-evaluates the pane with the now-closed
+# decision's status log, rather than treating the prior decision-held hash as
+# already-surfaced.
+clear_decision_held_tracking() {  # <window>
+  local win=$1 key
+  key=$(printf '%s' "$win" | tr ':/.' '___')
+  rm -f "$STATE/.decision-held-$key" "$STATE/.decision-resurfaced-$key" \
+    "$STATE/.stale-$key" "$STATE/.stale-since-$key" "$STATE/.wedge-escalations-$key"
 }
 
 # Reconcile a declared pause or captain-held status with authoritative crew state.
@@ -1051,6 +1112,33 @@ EOF
             printf '%s' "$h" > "$sf"
             wake "stale: $w"
           fi
+        elif task_has_open_decision "$STATE" "$task"; then
+          # The crew's task carries a still-open captain decision (a
+          # needs-decision/blocked the fold has not closed). Its inactivity is
+          # explained by that open decision, not by a wedge, so absorb on the
+          # long PAUSE_RESURFACE_SECS re-surface cadence instead of wedge-
+          # escalating every STALE_ESCALATE_SECS - the live 2026-08 case where a
+          # crew parked on a captain decision fired a stale every four minutes,
+          # each costing a full firstmate turn only to re-conclude "still waiting
+          # for the same decision". The needs-decision itself already surfaced via
+          # the signal path (a captain-relevant verb is always actionable), so
+          # absorbing here loses nothing. Kept distinct from a declared pause:
+          # a captain decision wait is not a self-resolving external pause, so
+          # handle_decision_held_stale uses its own markers and reason text and
+          # never touches the .paused-* flag. When the decision closes, the
+          # branch below clears the tracking and the normal wedge cadence
+          # resumes from a clean first-sight on the next poll.
+          handle_decision_held_stale "$w" "$task" "$h"
+        elif [ -e "$STATE/.decision-held-$key" ]; then
+          # The task's open decision closed since the last poll (a resolved or
+          # captain-held line landed, so task_has_open_decision is now false
+          # while the decision-held marker remained). Clear the tracking and
+          # skip triage this poll so the normal terminal/non-terminal triage
+          # re-evaluates this pane from a clean first-sight on the next poll -
+          # restoring the normal wedge cadence immediately, so a crew that stays
+          # mute AFTER the answer is a real wedge and re-escalates exactly as
+          # before.
+          clear_decision_held_tracking "$w"
         elif stale_is_terminal "$w" "$STATE"; then
           # The log's last line is captain-relevant - but that alone is not
           # proof the crew is actually done: a crew's own status log gets no
@@ -1142,7 +1230,7 @@ EOF
         if [ "$busy_now" -eq 0 ] && busy_turn_over_age "$task"; then
           wedge_timer_check "$w" "$ssf" "busy (no completed turn)" "$ewf"
         else
-          rm -f "$ssf" "$ewf"
+          rm -f "$ssf" "$ewf" "$STATE/.decision-held-$key" "$STATE/.decision-resurfaced-$key"
         fi
         if [ -e "$pf" ] && { [ "$n" -ge 2 ] || ! status_is_paused_or_captain_held "$(last_status_line "$STATE/$(window_to_task "$w" "$STATE").status")"; }; then
           clear_pause_tracking "$w"
@@ -1154,7 +1242,7 @@ EOF
       if [ "$busy_now" -eq 0 ] && busy_turn_over_age "$task"; then
         wedge_timer_check "$w" "$ssf" "busy (no completed turn)" "$ewf"
       else
-        rm -f "$ssf" "$ewf"
+        rm -f "$ssf" "$ewf" "$STATE/.decision-held-$key" "$STATE/.decision-resurfaced-$key"
       fi
       task=$(window_to_task "$w" "$STATE")
       if ! afk_present && status_is_paused_or_captain_held "$(last_status_line "$STATE/$task.status")" && [ "$busy_now" -ne 0 ]; then

@@ -1925,6 +1925,201 @@ test_afk_paused_changed_pane_hands_off_plain_stale() {
   pass "AFK changed paused panes hand off plain stale identities for daemon-owned pause triage"
 }
 
+# --- stale pane, task carries an OPEN captain decision: absorbed on the long
+#     cadence, never wedge-escalated every STALE_ESCALATE_SECS ----------------
+# The live 2026-08 case: a crew parked on a captain decision (needs-decision:)
+# with a provably-working pane tripped a possible-wedge stale every four minutes,
+# each costing a full firstmate turn only to re-conclude "still waiting for the
+# same decision". The open decision (status_open_decisions) explains the
+# inactivity, so the watcher absorbs it on the long PAUSE_RESURFACE_SECS cadence
+# instead, exactly like a declared pause but kept distinct.
+test_open_decision_stale_absorbed_on_long_cadence_not_wedged() {
+  local dir state fakebin out drain_out capture_file window key pane_hash sig pid back
+  dir=$(make_case open-decision-held); state="$dir/state"; fakebin="$dir/fakebin"
+  out="$dir/watch.out"; drain_out="$dir/drain.out"; capture_file="$dir/pane.txt"
+  window="test:fm-held"
+  printf 'idle, awaiting captain decision\n' > "$capture_file"
+  printf 'window=%s\nkind=ship\n' "$window" > "$state/held.meta"
+  printf 'needs-decision [key=api-shape]: pick A or B\n' > "$state/held.status"
+  sig=$(seen_sig "$state/held.status"); printf '%s' "$sig" > "$state/.seen-held_status"
+  key=$(printf '%s' "$window" | tr ':/.' '___')
+  pane_hash=$(hash_text "idle, awaiting captain decision")
+  printf '%s' "$pane_hash" > "$state/.hash-$key"
+  printf '1\n' > "$state/.count-$key"
+  export FM_FAKE_CREW_STATE='state: working · source: pane · harness busy'
+
+  # Phase A: first sight of an open-decision stale is absorbed - no wake, no
+  # wedge timer, decision-held marker recorded, pause flag untouched.
+  PATH="$fakebin:$PATH" FM_FAKE_TMUX_WINDOW="$window" FM_FAKE_TMUX_CAPTURE="$capture_file" \
+    FM_FAKE_TMUX_CURRENT_COMMAND=zsh \
+    FM_STATE_OVERRIDE="$state" FM_CREW_STATE_BIN="$fakebin/fm-crew-state.sh" \
+    FM_STALE_ESCALATE_SECS=999 FM_PAUSE_RESURFACE_SECS=999 FM_POLL=1 FM_SIGNAL_GRACE=1 \
+    FM_CHECK_INTERVAL=999999 FM_HEARTBEAT=999999 "$WATCH" > "$out" &
+  pid=$!
+  if ! wait_live "$pid" 30; then
+    reap "$pid"; fail "watcher exited for an open-decision stale (should absorb): $(cat "$out")"
+  fi
+  [ ! -s "$out" ] || fail "open-decision stale printed a wake reason during absorb"
+  [ ! -s "$state/.wake-queue" ] || fail "open-decision stale enqueued a wake during absorb"
+  [ -e "$state/.decision-held-$key" ] || fail "decision-held marker was not recorded on absorb"
+  [ ! -e "$state/.stale-since-$key" ] || fail "open-decision absorb started the wedge timer"
+  [ ! -e "$state/.paused-$key" ] || fail "open-decision absorb touched the pause flag"
+  [ "$(cat "$state/.stale-$key" 2>/dev/null || true)" = "$pane_hash" ] \
+    || fail "stale suppressor not advanced on decision-held absorb"
+  reap "$pid"
+  ack_stopped_cycle "$state" || fail "could not acknowledge the decision-held phase-A stop"
+
+  # Phase A2: the wedge threshold is now low (240s) - exactly the cadence that
+  # wedge-escalated every four minutes today - while the re-surface threshold
+  # stays high. The open decision must STILL absorb (no wedge, no wake), proving
+  # the 4-min cycle is gone. Backdating .stale-since is a no-op for the
+  # decision-held path (it never reads it), so even a prior wedge timer cannot
+  # fire; the open decision routes to handle_decision_held_stale regardless.
+  echo $(( $(date +%s) - 500 )) > "$state/.stale-since-$key"
+  : > "$out"
+  PATH="$fakebin:$PATH" FM_FAKE_TMUX_WINDOW="$window" FM_FAKE_TMUX_CAPTURE="$capture_file" \
+    FM_FAKE_TMUX_CURRENT_COMMAND=zsh \
+    FM_STATE_OVERRIDE="$state" FM_CREW_STATE_BIN="$fakebin/fm-crew-state.sh" \
+    FM_STALE_ESCALATE_SECS=240 FM_PAUSE_RESURFACE_SECS=999 FM_POLL=1 FM_SIGNAL_GRACE=1 \
+    FM_CHECK_INTERVAL=999999 FM_HEARTBEAT=999999 "$WATCH" > "$out" &
+  pid=$!
+  if ! wait_live "$pid" 30; then
+    reap "$pid"; fail "open-decision stale wedge-escalated at 240s instead of absorbing: $(cat "$out")"
+  fi
+  [ ! -s "$out" ] || fail "open-decision stale printed a wake at the 240s wedge threshold"
+  [ ! -s "$state/.wake-queue" ] || fail "open-decision stale enqueued a wake at the 240s wedge threshold"
+  grep -F "possible wedge" "$out" >/dev/null \
+    && fail "open-decision stale was wedge-escalated instead of absorbed"
+  [ ! -e "$state/.stale-since-$key" ] || fail "open-decision absorb left the wedge timer armed"
+  reap "$pid"
+  ack_stopped_cycle "$state" || fail "could not acknowledge the decision-held phase-A2 stop"
+
+  # Phase B: age the decision past the re-surface threshold by backdating its
+  # status file, re-prime .seen-*, and confirm it re-surfaces as a decision-held
+  # recheck - never a wedge.
+  back=$(( $(date +%s) - 500 ))
+  if [ "$(uname)" = Darwin ]; then touch -mt "$(date -r "$back" '+%Y%m%d%H%M.%S')" "$state/held.status"
+  else touch -m -d "@$back" "$state/held.status"; fi
+  sig=$(seen_sig "$state/held.status"); printf '%s' "$sig" > "$state/.seen-held_status"
+  : > "$out"
+  PATH="$fakebin:$PATH" FM_FAKE_TMUX_WINDOW="$window" FM_FAKE_TMUX_CAPTURE="$capture_file" \
+    FM_FAKE_TMUX_CURRENT_COMMAND=zsh \
+    FM_STATE_OVERRIDE="$state" FM_CREW_STATE_BIN="$fakebin/fm-crew-state.sh" \
+    FM_STALE_ESCALATE_SECS=240 FM_PAUSE_RESURFACE_SECS=240 FM_POLL=1 FM_SIGNAL_GRACE=1 \
+    FM_CHECK_INTERVAL=999999 FM_HEARTBEAT=999999 "$WATCH" > "$out" &
+  pid=$!
+  wait_for_exit "$pid" 40 || fail "watcher did not re-surface an open decision past the threshold"
+  grep -F "stale: $window" "$out" >/dev/null || fail "re-surface did not print a stale wake"
+  grep -F "awaiting captain" "$out" >/dev/null || fail "re-surface was not labeled a decision-held recheck"
+  grep -F "possible wedge" "$out" >/dev/null && fail "an open decision was mislabeled a possible wedge"
+  [ -e "$state/.decision-resurfaced-$key" ] || fail "decision re-surface throttle marker was not recorded"
+  [ ! -e "$state/.stale-since-$key" ] || fail "decision re-surface used the wedge timer"
+  FM_STATE_OVERRIDE="$state" "$DRAIN" > "$drain_out" 2>/dev/null || fail "drain after the decision re-surface failed"
+  grep "$(printf '\tstale\t')" "$drain_out" | grep -F "$window" >/dev/null || fail "decision re-surface was not queued"
+  unset FM_FAKE_CREW_STATE
+  pass "an open captain decision is absorbed on the long cadence and re-surfaced as a recheck, never wedge-escalated"
+}
+
+# --- the decision closes: normal wedge cadence resumes immediately ----------
+# A crew that stays mute AFTER the captain's answer is a real wedge and must
+# re-escalate. Once the decision fold closes (a resolved line lands),
+# task_has_open_decision turns false, the decision-held tracking is cleared, and
+# the next poll re-evaluates the pane from a clean first-sight under the normal
+# terminal/non-terminal triage - so the wedge detector is restored at once.
+test_open_decision_closure_resumes_normal_cadence() {
+  local dir state fakebin out drain_out capture_file window key pane_hash sig pid
+  dir=$(make_case decision-closure); state="$dir/state"; fakebin="$dir/fakebin"
+  out="$dir/watch.out"; drain_out="$dir/drain.out"; capture_file="$dir/pane.txt"
+  window="test:fm-answered"
+  printf 'idle, mute after the answer\n' > "$capture_file"
+  printf 'window=%s\nkind=ship\n' "$window" > "$state/answered.meta"
+  # An open decision that the captain then resolves - the fold is now closed.
+  printf 'needs-decision [key=api-shape]: pick A or B\nresolved [key=api-shape]: captain chose A\n' > "$state/answered.status"
+  sig=$(seen_sig "$state/answered.status"); printf '%s' "$sig" > "$state/.seen-answered_status"
+  key=$(printf '%s' "$window" | tr ':/.' '___')
+  pane_hash=$(hash_text "idle, mute after the answer")
+  printf '%s' "$pane_hash" > "$state/.hash-$key"
+  printf '1\n' > "$state/.count-$key"
+  # Pretend a prior decision-held absorb so the closure branch is the path under
+  # test: the marker exists, the fold is closed, so the watcher must clear it and
+  # re-evaluate from a clean first-sight.
+  : > "$state/.decision-held-$key"
+  printf '%s' "$pane_hash" > "$state/.stale-$key"
+  # Crew is NOT provably working (it got its answer and went idle), so the
+  # normal non-terminal triage surfaces immediately - the real-wedge re-escalate.
+  export FM_FAKE_CREW_STATE='state: stopped · source: pane · bare shell'
+  PATH="$fakebin:$PATH" FM_FAKE_TMUX_WINDOW="$window" FM_FAKE_TMUX_CAPTURE="$capture_file" \
+    FM_FAKE_TMUX_CURRENT_COMMAND=zsh \
+    FM_STATE_OVERRIDE="$state" FM_CREW_STATE_BIN="$fakebin/fm-crew-state.sh" \
+    FM_STALE_ESCALATE_SECS=999 FM_PAUSE_RESURFACE_SECS=999 FM_POLL=1 FM_SIGNAL_GRACE=1 \
+    FM_CHECK_INTERVAL=999999 FM_HEARTBEAT=999999 "$WATCH" > "$out" &
+  pid=$!
+  wait_for_exit "$pid" 40 || fail "watcher did not re-escalate a mute crew after the decision closed"
+  grep -F "stale: $window" "$out" >/dev/null || fail "closure did not re-surface the mute crew"
+  grep -F "awaiting captain" "$out" >/dev/null \
+    && fail "closure re-surfaced as a decision-held recheck instead of a normal stale"
+  grep -F "possible wedge" "$out" >/dev/null && fail "an immediate not-provably-working re-surface was mislabeled a wedge"
+  [ ! -e "$state/.decision-held-$key" ] || fail "closure did not clear the decision-held marker"
+  FM_STATE_OVERRIDE="$state" "$DRAIN" > "$drain_out" 2>/dev/null || fail "drain after closure re-escalate failed"
+  grep "$(printf '\tstale\t')" "$drain_out" | grep -F "$window" >/dev/null || fail "closure re-escalate was not queued"
+  unset FM_FAKE_CREW_STATE
+  pass "a closed decision resumes the normal cadence and a mute crew re-escalates immediately"
+}
+
+# --- no open decision: a needs-decision that was resolved wedge-escalates ---
+# exactly like today (no regression on wedge detection). A crew whose decision
+# has closed carries no open decision, so the decision-held absorb never applies
+# and the existing provably-working wedge path is unchanged.
+test_closed_decision_stale_wedge_escalates_like_today() {
+  local dir state fakebin out drain_out capture_file window key pane_hash sig pid
+  dir=$(make_case closed-decision-wedge); state="$dir/state"; fakebin="$dir/fakebin"
+  out="$dir/watch.out"; drain_out="$dir/drain.out"; capture_file="$dir/pane.txt"
+  window="test:fm-resolved"
+  printf 'idle building again\n' > "$capture_file"
+  printf 'window=%s\nkind=ship\n' "$window" > "$state/resolved.meta"
+  # The needs-decision was resolved, so the fold is closed: no open decision.
+  printf 'needs-decision [key=api-shape]: pick A or B\nresolved [key=api-shape]: captain chose A\nworking: resuming\n' > "$state/resolved.status"
+  sig=$(seen_sig "$state/resolved.status"); printf '%s' "$sig" > "$state/.seen-resolved_status"
+  key=$(printf '%s' "$window" | tr ':/.' '___')
+  pane_hash=$(hash_text "idle building again")
+  printf '%s' "$pane_hash" > "$state/.hash-$key"
+  printf '1\n' > "$state/.count-$key"
+  export FM_FAKE_CREW_STATE='state: working · source: run-step · validating (running)'
+
+  # Phase A: high wedge threshold -> a non-terminal provably-working stale is
+  # absorbed exactly as today (the decision is closed, so no decision-held path).
+  PATH="$fakebin:$PATH" FM_FAKE_TMUX_WINDOW="$window" FM_FAKE_TMUX_CAPTURE="$capture_file" \
+    FM_STATE_OVERRIDE="$state" FM_CREW_STATE_BIN="$fakebin/fm-crew-state.sh" \
+    FM_STALE_ESCALATE_SECS=999 FM_POLL=1 FM_SIGNAL_GRACE=1 \
+    FM_CHECK_INTERVAL=999999 FM_HEARTBEAT=999999 "$WATCH" > "$out" &
+  pid=$!
+  if ! wait_live "$pid" 30; then
+    reap "$pid"; fail "watcher exited for a closed-decision provably-working stale (should absorb): $(cat "$out")"
+  fi
+  [ ! -s "$out" ] || fail "closed-decision stale printed a wake during absorb"
+  [ ! -e "$state/.decision-held-$key" ] || fail "a closed decision was misrouted to the decision-held absorb"
+  [ -s "$state/.stale-since-$key" ] || fail "the normal wedge timer was not started for a closed-decision stale"
+  reap "$pid"
+  ack_stopped_cycle "$state" || fail "could not acknowledge the closed-decision phase-A stop"
+
+  # Phase B: backdate the idle timer past the threshold; the run wedges and the
+  # next poll escalates exactly like the non-terminal case - no decision-held
+  # suppression.
+  echo $(( $(date +%s) - 500 )) > "$state/.stale-since-$key"
+  : > "$out"
+  PATH="$fakebin:$PATH" FM_FAKE_TMUX_WINDOW="$window" FM_FAKE_TMUX_CAPTURE="$capture_file" \
+    FM_STATE_OVERRIDE="$state" FM_CREW_STATE_BIN="$fakebin/fm-crew-state.sh" \
+    FM_STALE_ESCALATE_SECS=240 FM_POLL=1 FM_SIGNAL_GRACE=1 \
+    FM_CHECK_INTERVAL=999999 FM_HEARTBEAT=999999 "$WATCH" > "$out" &
+  pid=$!
+  wait_for_exit "$pid" 40 || fail "watcher did not escalate a closed-decision stale past the threshold"
+  grep -F "stale: $window" "$out" >/dev/null || fail "escalation did not print a stale wake"
+  grep -F "possible wedge" "$out" >/dev/null || fail "escalation did not flag a possible wedge"
+  grep -F "awaiting captain" "$out" >/dev/null && fail "a closed-decision wedge was mislabeled a decision-held recheck"
+  unset FM_FAKE_CREW_STATE
+  pass "a closed decision does not suppress the wedge: it escalates exactly like today"
+}
+
 test_signal_reason_is_actionable_classifier
 test_stale_is_terminal_classifier
 test_scan_captain_relevant_statuses_classifier
@@ -1955,6 +2150,9 @@ test_busy_pane_default_turn_age_bound_is_3600s
 test_nonterminal_stale_not_working_surfaced
 test_nonterminal_stale_paused_absorbed_then_resurfaced
 test_exited_declared_pause_is_bounded_but_live_gate_surfaces
+test_open_decision_stale_absorbed_on_long_cadence_not_wedged
+test_open_decision_closure_resumes_normal_cadence
+test_closed_decision_stale_wedge_escalates_like_today
 test_secondmate_paused_resurfaces_in_normal_mode
 test_secondmate_nonpaused_stale_remains_suppressed
 test_secondmate_unpause_clears_pause_tracking
