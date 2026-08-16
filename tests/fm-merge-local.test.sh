@@ -170,20 +170,21 @@ test_escape_hatch_is_a_noop_on_a_clean_landing() {
 }
 
 test_dropped_commits_outlive_an_aggressive_gc() {
-  local rec id out status dropped_sha rescue
+  local rec id out status dropped_sha ref rescue
   id='merge-local-rescue-r6'
   rec=$(make_case rescue "$id")
   read_case_record "$rec"
   dropped_sha=$(git -C "$PROJECT_DIR" rev-parse main)
+  ref="refs/fm-dropped/$id/$(git -C "$PROJECT_DIR" rev-parse --short main)"
 
   out=$(run_merge --drop-local-commits "$id")
   status=$?
   expect_code 0 "$status" "the explicit escape hatch should land: $out"
-  assert_contains "$out" "refs/fm-dropped/$id" "the escape hatch did not name the rescue ref that keeps the drop recoverable"
-  assert_contains "$out" "update-ref -d refs/fm-dropped/$id" "the escape hatch did not say how to release the rescue ref"
-  assert_grep "rescue_ref=refs/fm-dropped/$id" "$HOME_DIR/state/$id.local-merge-drop" \
+  assert_contains "$out" "$ref" "the escape hatch did not name the rescue ref that keeps the drop recoverable"
+  assert_contains "$out" "update-ref -d $ref" "the escape hatch did not say how to release the rescue ref"
+  assert_grep "rescue_ref=$ref" "$HOME_DIR/state/$id.local-merge-drop" \
     "the trace record does not name the rescue ref that holds the dropped commits"
-  rescue=$(git -C "$PROJECT_DIR" rev-parse --verify --quiet "refs/fm-dropped/$id" || true)
+  rescue=$(git -C "$PROJECT_DIR" rev-parse --verify --quiet "$ref" || true)
   [ "$rescue" = "$dropped_sha" ] \
     || fail "rescue ref holds '$rescue', expected the pre-reset tip $dropped_sha"
 
@@ -196,7 +197,7 @@ test_dropped_commits_outlive_an_aggressive_gc() {
     'adopt upstream PR #1234 locally' "the rescued commit is no longer readable after gc"
 
   # And the documented release really releases: the ref is the only thing holding them.
-  git -C "$PROJECT_DIR" update-ref -d "refs/fm-dropped/$id"
+  git -C "$PROJECT_DIR" update-ref -d "$ref"
   git -C "$PROJECT_DIR" reflog expire --expire=now --expire-unreachable=now --all >/dev/null 2>&1
   git -C "$PROJECT_DIR" gc --prune=now --quiet >/dev/null 2>&1 || fail "gc failed after releasing the rescue ref"
   if git -C "$PROJECT_DIR" cat-file -e "$dropped_sha^{commit}" 2>/dev/null; then
@@ -205,33 +206,74 @@ test_dropped_commits_outlive_an_aggressive_gc() {
   pass "dropped commits are held by a rescue ref that outlives the reflog, and the documented release frees them"
 }
 
-test_a_second_drop_never_strands_an_earlier_rescue() {
-  local rec id out status first_sha before
+test_successive_drops_each_keep_their_own_rescue() {
+  local rec id out status first_sha second_sha first_ref second_ref
   id='merge-local-rescue-twice-r7'
   rec=$(make_case rescue-twice "$id")
   read_case_record "$rec"
   first_sha=$(git -C "$PROJECT_DIR" rev-parse main)
+  first_ref="refs/fm-dropped/$id/$(git -C "$PROJECT_DIR" rev-parse --short main)"
 
   out=$(run_merge --drop-local-commits "$id")
   status=$?
   expect_code 0 "$status" "the first authorized drop should land: $out"
 
-  # A later local-only commit makes the same task droppable again; the second
-  # drop must not silently reuse the rescue ref and strand the first drop.
+  # A later local-only commit makes the same task droppable again. The second
+  # drop must succeed on its own, without the operator releasing the first rescue.
   printf 'a second local adoption\n' > "$PROJECT_DIR/adoption-2.txt"
   git_c "$PROJECT_DIR" add adoption-2.txt
   git_c "$PROJECT_DIR" commit -qm 'adopt upstream PR #5678 locally'
-  before=$(git -C "$PROJECT_DIR" rev-parse main)
+  second_sha=$(git -C "$PROJECT_DIR" rev-parse main)
+  second_ref="refs/fm-dropped/$id/$(git -C "$PROJECT_DIR" rev-parse --short main)"
+  [ "$second_ref" != "$first_ref" ] || fail "both drops resolved to the same rescue ref name"
 
   out=$(run_merge --drop-local-commits "$id")
   status=$?
-  [ "$status" -ne 0 ] || fail "a second drop overwrote the rescue ref instead of refusing"
-  assert_contains "$out" "refs/fm-dropped/$id" "the refusal did not name the rescue ref it declined to overwrite"
-  assert_contains "$out" "update-ref -d refs/fm-dropped/$id" "the refusal did not say how to release the earlier rescue"
-  [ "$(git -C "$PROJECT_DIR" rev-parse main)" = "$before" ] || fail "the refused second drop still moved main"
-  [ "$(git -C "$PROJECT_DIR" rev-parse --verify --quiet "refs/fm-dropped/$id")" = "$first_sha" ] \
-    || fail "the refused second drop still moved the rescue ref off the first drop's commits"
-  pass "a second drop refuses rather than stranding the commits an earlier rescue ref holds"
+  expect_code 0 "$status" "the second authorized drop should land without releasing the first rescue: $out"
+  assert_contains "$out" "$second_ref" "the second drop did not name its own rescue ref"
+
+  [ "$(git -C "$PROJECT_DIR" rev-parse --verify --quiet "$first_ref")" = "$first_sha" ] \
+    || fail "the second drop displaced the first drop's rescue ref"
+  [ "$(git -C "$PROJECT_DIR" rev-parse --verify --quiet "$second_ref")" = "$second_sha" ] \
+    || fail "the second drop did not pin its own tip"
+
+  git -C "$PROJECT_DIR" reflog expire --expire=now --expire-unreachable=now --all >/dev/null 2>&1
+  git -C "$PROJECT_DIR" gc --prune=now --quiet >/dev/null 2>&1 || fail "gc failed in the test project"
+  git -C "$PROJECT_DIR" cat-file -e "$first_sha^{commit}" 2>/dev/null \
+    || fail "the first drop's commits died once a second drop happened"
+  git -C "$PROJECT_DIR" cat-file -e "$second_sha^{commit}" 2>/dev/null \
+    || fail "the second drop's commits are not held by their rescue ref"
+  assert_contains "$(git -C "$PROJECT_DIR" log -1 --format='%s' "$first_sha")" \
+    'adopt upstream PR #1234 locally' "the first drop's rescued commit is no longer readable"
+  assert_contains "$(git -C "$PROJECT_DIR" log -1 --format='%s' "$second_sha")" \
+    'adopt upstream PR #5678 locally' "the second drop's rescued commit is no longer readable"
+  pass "successive drops on one task each keep their own rescue ref, and neither release is forced by the other"
+}
+
+test_redropping_a_recovered_tip_reuses_its_own_rescue() {
+  local rec id out status dropped_sha ref
+  id='merge-local-rescue-redrop-r8'
+  rec=$(make_case rescue-redrop "$id")
+  read_case_record "$rec"
+  dropped_sha=$(git -C "$PROJECT_DIR" rev-parse main)
+  ref="refs/fm-dropped/$id/$(git -C "$PROJECT_DIR" rev-parse --short main)"
+
+  out=$(run_merge --drop-local-commits "$id")
+  status=$?
+  expect_code 0 "$status" "the first authorized drop should land: $out"
+
+  # The operator recovers main from the rescue ref, then decides to drop again.
+  git_c "$PROJECT_DIR" reset --hard --quiet "$ref"
+
+  out=$(run_merge --drop-local-commits "$id")
+  status=$?
+  expect_code 0 "$status" "re-dropping a recovered tip should land: $out"
+  assert_contains "$out" "already holds $dropped_sha" "the re-drop did not say the rescue ref was already in place"
+  [ "$(git -C "$PROJECT_DIR" rev-parse --verify --quiet "$ref")" = "$dropped_sha" ] \
+    || fail "the re-drop moved the rescue ref off the tip it already held"
+  [ "$(git -C "$PROJECT_DIR" rev-parse main)" = "$(git -C "$PROJECT_DIR" rev-parse "fm/$id")" ] \
+    || fail "the re-drop did not land the branch"
+  pass "re-dropping a tip a rescue ref already holds keeps that ref and says so"
 }
 
 test_clean_landing_fast_forwards
@@ -240,6 +282,7 @@ test_reconciled_branch_lands_cleanly
 test_escape_hatch_drops_explicitly_and_traceably
 test_escape_hatch_is_a_noop_on_a_clean_landing
 test_dropped_commits_outlive_an_aggressive_gc
-test_a_second_drop_never_strands_an_earlier_rescue
+test_successive_drops_each_keep_their_own_rescue
+test_redropping_a_recovered_tip_reuses_its_own_rescue
 
 echo "# all fm-merge-local tests passed"

@@ -21,18 +21,21 @@
 # --drop-local-commits is the deliberate escape hatch for the case where losing
 # them IS the intent. It is never the default and never silent: it refuses unless
 # the guard actually triggered, prints every dropped commit, pins the pre-reset
-# tip of the default branch under refs/fm-dropped/<id> and records them in
-# state/<id>.local-merge-drop before touching the branch, and then resets the
-# default branch to the task branch. That rescue ref is what makes the recorded
-# SHAs recoverable: after the reset the dropped commits hang off nothing else,
-# and the reflog that would otherwise hold them expires (gc.reflogExpireUnreachable,
-# 30 days by default) and is then pruned by `git gc`. A ref never expires, so the
-# commits stay in the project for as long as it does - and stay there until
-# someone releases them with `git update-ref -d refs/fm-dropped/<id>`, which is
-# the deliberate counterpart of that guarantee. The branch never moves when that
-# ref cannot be planted, including when an earlier rescue ref still holds commits
-# the new one would not. Being destructive, the whole escape hatch needs the
-# captain's explicit word.
+# tip of the default branch under refs/fm-dropped/<id>/<short-sha> and records
+# them in state/<id>.local-merge-drop before touching the branch, and then resets
+# the default branch to the task branch. That rescue ref is what makes the
+# recorded SHAs recoverable: after the reset the dropped commits hang off nothing
+# else, and the reflog that would otherwise hold them expires
+# (gc.reflogExpireUnreachable, 30 days by default) and is then pruned by `git gc`.
+# A ref never expires, so the commits stay in the project for as long as it does.
+# The ref is keyed by the rescued tip, not by the task, so a later drop on the
+# same task plants its own ref beside the earlier one instead of displacing it,
+# and the branch never moves when a ref cannot be planted. Each ref is released
+# on its own - `git update-ref -d refs/fm-dropped/<id>/<short-sha>` frees exactly
+# that drop's commits and leaves every other rescue alone - which is the
+# deliberate counterpart of the guarantee: until then those commits stay in the
+# project. Being destructive, the whole escape hatch needs the captain's explicit
+# word.
 # Usage: fm-merge-local.sh [--drop-local-commits] <task-id>
 set -eu
 
@@ -114,21 +117,22 @@ if [ -n "$DROPPED" ]; then
 
   before=$(git -C "$PROJ" rev-parse "$DEFAULT")
   RECORD="$STATE/$ID.local-merge-drop"
-  RESCUE_REF="refs/fm-dropped/$ID"
+  # Keyed by the rescued tip, so successive drops on one task never contend for
+  # the same name and none can displace another's commits.
+  RESCUE_REF="refs/fm-dropped/$ID/$(git -C "$PROJ" rev-parse --short "$before")"
 
-  # Plant the rescue ref BEFORE the reset, and never move the branch without it:
-  # it is the only thing that keeps the dropped commits reachable once the reflog
-  # is pruned. Refuse to clobber an earlier rescue point the new one would not
-  # itself hold, which would strand exactly the commits it promised to keep.
+  # Plant it BEFORE the reset, and never move the branch without it: it is the
+  # only thing that keeps the dropped commits reachable once the reflog is
+  # pruned. Creating it with an empty expected value makes clobbering impossible.
   held=$(git -C "$PROJ" rev-parse --verify --quiet "$RESCUE_REF^{commit}" || true)
-  if [ -n "$held" ] && ! git -C "$PROJ" merge-base --is-ancestor "$held" "$before"; then
-    echo "error: rescue ref $RESCUE_REF already holds $held from an earlier drop and $DEFAULT no longer contains it; overwriting it would strand those commits. Release it first (git -C $PROJ update-ref -d $RESCUE_REF) if they are truly unwanted, then re-run. $DEFAULT is untouched." >&2
-    exit 1
+  if [ "$held" = "$before" ]; then
+    echo "note: rescue ref $RESCUE_REF already holds $before from an earlier drop; leaving it as it is"
+  else
+    git -C "$PROJ" update-ref "$RESCUE_REF" "$before" "" || {
+      echo "error: could not plant rescue ref $RESCUE_REF at $before in $PROJ; refusing to drop commits with no way back. $DEFAULT is untouched." >&2
+      exit 1
+    }
   fi
-  git -C "$PROJ" update-ref "$RESCUE_REF" "$before" || {
-    echo "error: could not plant rescue ref $RESCUE_REF at $before in $PROJ; refusing to drop commits with no way back. $DEFAULT is untouched." >&2
-    exit 1
-  }
 
   {
     echo "# $(date -u '+%Y-%m-%dT%H:%M:%SZ') fm-merge-local.sh --drop-local-commits"
@@ -144,7 +148,7 @@ if [ -n "$DROPPED" ]; then
   echo "DROPPING $(printf '%s\n' "$DROPPED" | wc -l | tr -d ' ') local-only commit(s) from $DEFAULT as explicitly authorized:"
   git -C "$PROJ" log --no-decorate --format='  %H %s' "$BRANCH..$DEFAULT"
   echo "recorded in $RECORD; rescue ref $RESCUE_REF now holds $DEFAULT's pre-reset tip, so those commits stay in $PROJ (not just in the reflog) and stay recoverable by full SHA"
-  echo "release them for good with: git -C $PROJ update-ref -d $RESCUE_REF"
+  echo "release this drop's commits for good with: git -C $PROJ update-ref -d $RESCUE_REF (other drops keep their own ref)"
 
   git -C "$PROJ" reset --hard "$BRANCH" >/dev/null
   after=$(git -C "$PROJ" rev-parse --short "$DEFAULT")
