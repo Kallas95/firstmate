@@ -1972,9 +1972,10 @@ test_open_decision_stale_absorbed_on_long_cadence_not_wedged() {
   # Phase A2: the wedge threshold is now low (240s) - exactly the cadence that
   # wedge-escalated every four minutes today - while the re-surface threshold
   # stays high. The open decision must STILL absorb (no wedge, no wake), proving
-  # the 4-min cycle is gone. Backdating .stale-since is a no-op for the
-  # decision-held path (it never reads it), so even a prior wedge timer cannot
-  # fire; the open decision routes to handle_decision_held_stale regardless.
+  # the 4-min cycle is gone. Backdating .stale-since plants a long-crossed wedge
+  # timer, so this also proves the later poll of an absorbed decision-held hash
+  # takes the long cadence instead of wedge_timer_check - and that it does so
+  # without re-folding, the status file being untouched since the phase-A absorb.
   echo $(( $(date +%s) - 500 )) > "$state/.stale-since-$key"
   : > "$out"
   PATH="$fakebin:$PATH" FM_FAKE_TMUX_WINDOW="$window" FM_FAKE_TMUX_CAPTURE="$capture_file" \
@@ -2020,6 +2021,75 @@ test_open_decision_stale_absorbed_on_long_cadence_not_wedged() {
   pass "an open captain decision is absorbed on the long cadence and re-surfaced as a recheck, never wedge-escalated"
 }
 
+# --- open decision but the crew is NOT provably working: surfaced immediately -
+# The decision-held absorb is a trade of the WEDGE TIMER, which only a
+# provably-working pane ever armed. A crew that stopped or died with a decision
+# still open shows no working evidence, so the absorb-only-when-provably-working
+# rule stands: it surfaces at once instead of being swallowed for a whole
+# PAUSE_RESURFACE_SECS window (and, since a never-answered decision never closes,
+# potentially forever). Covers both shapes of that pane: the open decision as the
+# log's last line (terminal triage) and buried under a later append
+# (non-terminal triage).
+test_open_decision_not_working_surfaces_immediately() {
+  local dir state fakebin out drain_out capture_file window key pane_hash sig pid
+  dir=$(make_case open-decision-not-working); state="$dir/state"; fakebin="$dir/fakebin"
+  out="$dir/watch.out"; drain_out="$dir/drain.out"; capture_file="$dir/pane.txt"
+  window="test:fm-frozen"
+  printf 'bare shell, agent gone\n' > "$capture_file"
+  printf 'window=%s\nkind=ship\n' "$window" > "$state/frozen.meta"
+  printf 'needs-decision [key=api-shape]: pick A or B\n' > "$state/frozen.status"
+  sig=$(seen_sig "$state/frozen.status"); printf '%s' "$sig" > "$state/.seen-frozen_status"
+  key=$(printf '%s' "$window" | tr ':/.' '___')
+  pane_hash=$(hash_text "bare shell, agent gone")
+  printf '%s' "$pane_hash" > "$state/.hash-$key"
+  printf '1\n' > "$state/.count-$key"
+  # The captain answered in the pane (no resolved: line was ever appended), the
+  # crew resumed and then died to a bare shell. The decision fold is still open.
+  export FM_FAKE_CREW_STATE='state: stopped · source: pane · bare shell'
+
+  # Phase A: the open decision is the last status line, so the terminal triage
+  # decides. Not provably working -> surface now, no decision-held absorb.
+  PATH="$fakebin:$PATH" FM_FAKE_TMUX_WINDOW="$window" FM_FAKE_TMUX_CAPTURE="$capture_file" \
+    FM_FAKE_TMUX_CURRENT_COMMAND=zsh \
+    FM_STATE_OVERRIDE="$state" FM_CREW_STATE_BIN="$fakebin/fm-crew-state.sh" \
+    FM_STALE_ESCALATE_SECS=999 FM_PAUSE_RESURFACE_SECS=999 FM_POLL=1 FM_SIGNAL_GRACE=1 \
+    FM_CHECK_INTERVAL=999999 FM_HEARTBEAT=999999 "$WATCH" > "$out" &
+  pid=$!
+  wait_for_exit "$pid" 40 \
+    || fail "a stopped crew with an open decision was absorbed instead of surfaced: $(cat "$out")"
+  grep -F "stale: $window" "$out" >/dev/null || fail "terminal open-decision stale did not surface for a stopped crew"
+  grep -F "awaiting captain" "$out" >/dev/null \
+    && fail "a stopped crew was absorbed on the decision-held long cadence"
+  [ ! -e "$state/.decision-held-$key" ] || fail "a stopped crew was flagged decision-held"
+  FM_STATE_OVERRIDE="$state" "$DRAIN" > "$drain_out" 2>/dev/null || fail "drain after the terminal surface failed"
+  grep "$(printf '\tstale\t')" "$drain_out" | grep -F "$window" >/dev/null \
+    || fail "the terminal open-decision surface was not queued"
+
+  # Phase B: same still-open decision, now buried under a later non-captain
+  # append, so the non-terminal triage decides. Still not provably working ->
+  # still surfaced immediately. The suppressor is re-primed to a foreign hash for
+  # a clean first-sight, and .seen-* re-primed so the status signal path stays quiet.
+  printf 'needs-decision [key=api-shape]: pick A or B\nworking: picking the pieces back up\n' > "$state/frozen.status"
+  sig=$(seen_sig "$state/frozen.status"); printf '%s' "$sig" > "$state/.seen-frozen_status"
+  printf 'not-this-hash' > "$state/.stale-$key"
+  printf '1\n' > "$state/.count-$key"
+  : > "$out"
+  PATH="$fakebin:$PATH" FM_FAKE_TMUX_WINDOW="$window" FM_FAKE_TMUX_CAPTURE="$capture_file" \
+    FM_FAKE_TMUX_CURRENT_COMMAND=zsh \
+    FM_STATE_OVERRIDE="$state" FM_CREW_STATE_BIN="$fakebin/fm-crew-state.sh" \
+    FM_STALE_ESCALATE_SECS=999 FM_PAUSE_RESURFACE_SECS=999 FM_POLL=1 FM_SIGNAL_GRACE=1 \
+    FM_CHECK_INTERVAL=999999 FM_HEARTBEAT=999999 "$WATCH" > "$out" &
+  pid=$!
+  wait_for_exit "$pid" 40 \
+    || fail "a stopped crew with a buried open decision was absorbed instead of surfaced: $(cat "$out")"
+  grep -F "stale: $window" "$out" >/dev/null || fail "non-terminal open-decision stale did not surface for a stopped crew"
+  grep -F "awaiting captain" "$out" >/dev/null \
+    && fail "a stopped crew with a buried decision was absorbed on the decision-held long cadence"
+  [ ! -e "$state/.decision-held-$key" ] || fail "a stopped crew with a buried decision was flagged decision-held"
+  unset FM_FAKE_CREW_STATE
+  pass "an open captain decision never absorbs a crew that is not provably working"
+}
+
 # --- the decision closes: normal wedge cadence resumes immediately ----------
 # A crew that stays mute AFTER the captain's answer is a real wedge and must
 # re-escalate. Once the decision fold closes (a resolved line lands),
@@ -2041,9 +2111,11 @@ test_open_decision_closure_resumes_normal_cadence() {
   printf '%s' "$pane_hash" > "$state/.hash-$key"
   printf '1\n' > "$state/.count-$key"
   # Pretend a prior decision-held absorb so the closure branch is the path under
-  # test: the marker exists, the fold is closed, so the watcher must clear it and
-  # re-evaluate from a clean first-sight.
-  : > "$state/.decision-held-$key"
+  # test: the marker exists but records a status mtime that no longer matches (a
+  # resolved line has since landed), which is exactly what forces the bounded
+  # re-validating fold. The fold now reports closed, so the watcher must clear the
+  # tracking and re-evaluate from a clean first-sight.
+  printf '1\n' > "$state/.decision-held-$key"
   printf '%s' "$pane_hash" > "$state/.stale-$key"
   # Crew is NOT provably working (it got its answer and went idle), so the
   # normal non-terminal triage surfaces immediately - the real-wedge re-escalate.
@@ -2151,6 +2223,7 @@ test_nonterminal_stale_not_working_surfaced
 test_nonterminal_stale_paused_absorbed_then_resurfaced
 test_exited_declared_pause_is_bounded_but_live_gate_surfaces
 test_open_decision_stale_absorbed_on_long_cadence_not_wedged
+test_open_decision_not_working_surfaces_immediately
 test_open_decision_closure_resumes_normal_cadence
 test_closed_decision_stale_wedge_escalates_like_today
 test_secondmate_paused_resurfaces_in_normal_mode
