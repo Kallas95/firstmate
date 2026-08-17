@@ -155,6 +155,13 @@ matrix_case D88 deny permission-change 'sh -xc "chmod +x a"'
 matrix_case D89 deny permission-change 'bash -lc "chmod +x a"'
 matrix_case D90 deny permission-change 'bash --norc -c "chmod +x a"'
 matrix_case D91 deny remote-transfer 'bash -o pipefail -c "ssh host uptime"'
+# A command word that is an expansion can be empty at run time, so the operand
+# after it is what runs. Both inline carriers must reach the same verdict.
+matrix_case D92 deny permission-change 'sh -c "$PREFIX chmod +x a"'
+matrix_case D93 deny permission-change 'eval "$PREFIX chmod +x a"'
+matrix_case D94 deny dotenv-access 'bash -c "$RUN cat .env"'
+matrix_case D95 deny dotenv-access 'eval "$RUN cat .env"'
+matrix_case D96 deny permission-change '$PREFIX chmod +x a'
 
 # ALLOW: ordinary worker work, including the push form the delivery path needs.
 matrix_case A01 allow - 'git push origin HEAD'
@@ -236,6 +243,22 @@ matrix_case A53 allow - 'git pull --ff-only origin main'
 matrix_case A54 allow - 'sh -cx "npm test"'
 matrix_case A55 allow - 'bash -c -- "npm run build"'
 matrix_case A56 allow - 'eval -- "npm test"'
+# Ordinary work passed inline stays ordinary work, and the two carriers agree
+# payload for payload: an expansion inside the text is not a perimeter action.
+matrix_case A57 allow - 'eval "git -C $DIR log -1"'
+matrix_case A58 allow - 'bash -c "git -C $DIR log -1"'
+matrix_case A59 allow - 'eval "cd $DIR && git status"'
+matrix_case A60 allow - 'bash -c "cd $DIR && git status"'
+matrix_case A61 allow - 'eval "git commit -m \"$MSG\""'
+matrix_case A62 allow - 'eval "git push origin $BRANCH"'
+matrix_case A63 allow - 'sh -c "$PYTHON script.py"'
+# Only the operand right after an uncertain command word is classified as a
+# command; a later one is an argument, and a search's own operand is its pattern.
+matrix_case A64 allow - 'time -p grep -rn ssh src/'
+matrix_case A65 allow - 'time -p rg chmod .'
+matrix_case A66 allow - 'time -p find . -name ssh'
+matrix_case A67 allow - 'for f in a; do time -p grep -l ssh $f; done'
+matrix_case A68 allow - 'if true; then time -p grep -rn chmod src/; fi'
 
 MATRIX_TMP=$(mktemp -d "${TMPDIR:-/tmp}/fm-worker-guard-matrix.XXXXXX")
 FM_TEST_CLEANUP_DIRS+=("$MATRIX_TMP")

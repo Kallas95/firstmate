@@ -350,15 +350,12 @@ function carriedPrograms(position) {
   return [];
 }
 
-// The payload of `eval '<program>'`, or "" when the arguments cannot be read as
-// one. eval runs the concatenation of its arguments, so it is classified the way
-// an inline shell payload is.
+// The payload of `eval '<program>'`. eval runs the concatenation of its
+// arguments, minus a leading end-of-options marker.
 function evalPayload(position) {
   let words = position.words.slice(position.index + 1);
   if (words[0]?.value === "--") words = words.slice(1);
-  if (words.length === 0) return "";
-  if (words.some((word) => !word.literal || word.subs.length > 0)) return "";
-  return words.map((word) => word.value).join(" ");
+  return { carried: true, payload: words.map((word) => word.value).join(" ") };
 }
 
 // The payload of `sh -c '<program>'`. `carried` says the invocation asked for an
@@ -375,6 +372,19 @@ function shellPayload(position) {
     return { carried: true, payload: words[payload]?.value ?? "" };
   }
   return { carried: false, payload: "" };
+}
+
+// The single point where an inline payload becomes a verdict, whatever carrier
+// transported it. A carrier's only job is EXTRACTING its payload text from its
+// own option grammar, and extraction legitimately differs between carriers;
+// classification must not, or two implementations that agree today drift at the
+// first correction that touches only one of them. A carrier that asked for a
+// payload but could not read one falls back on the ambiguity rule, so an
+// unrecognized spelling refuses rather than passing.
+function classifyInlinePayload({ carried, payload }, position, depth) {
+  if (!carried) return ALLOW;
+  if (payload) return classifyCommand(payload, depth + 1);
+  return mentionsPerimeter(position.words) ? deny("unclassifiable-perimeter-command") : ALLOW;
 }
 
 function classifyCommand(command, depth) {
@@ -466,23 +476,13 @@ function classifyNode(node, depth) {
   }
 
   if (SHELLS.has(name)) {
-    const { carried, payload } = shellPayload(position);
-    if (payload) {
-      const nested = classifyCommand(payload, depth + 1);
-      if (nested.decision === "deny") return nested;
-    } else if (carried && mentionsPerimeter(position.words)) {
-      return deny("unclassifiable-perimeter-command");
-    }
+    const nested = classifyInlinePayload(shellPayload(position), position, depth);
+    if (nested.decision === "deny") return nested;
   }
 
   if (name === "eval") {
-    const payload = evalPayload(position);
-    if (payload) {
-      const nested = classifyCommand(payload, depth + 1);
-      if (nested.decision === "deny") return nested;
-    } else if (mentionsPerimeter(position.words)) {
-      return deny("unclassifiable-perimeter-command");
-    }
+    const nested = classifyInlinePayload(evalPayload(position), position, depth);
+    if (nested.decision === "deny") return nested;
   }
 
   for (const carried of carriedPrograms(position)) {
@@ -490,13 +490,18 @@ function classifyNode(node, depth) {
     if (nested.decision === "deny") return nested;
   }
 
-  // A dropped option may have carried its value in the next token, which then
-  // stands where the command should be, so every later operand is classified as
-  // a command in turn rather than trusting one option spelling to say which.
-  if (optionDropped) {
-    for (let index = position.index + 1; index < position.words.length; index += 1) {
-      if (isOption(position.words[index].value)) continue;
-      const nested = classifyNode(position.words.slice(index), depth + 1);
+  // The resolved command word is not always the one that runs. A dropped keyword
+  // option can have left its VALUE standing in command position, and a command
+  // word that is an expansion can be empty at run time. Either way the command
+  // that runs is the operand immediately after it, so that ONE operand is
+  // classified as a command too - not the ones after it, which are its
+  // arguments, and not the operand of a command whose own grammar makes it a
+  // pattern, or `time -p grep -rn ssh src/` would refuse an ordinary search.
+  const commandWordUncertain = optionDropped || !position.command.literal;
+  if (commandWordUncertain && !PATTERN_READING_COMMANDS.has(name)) {
+    const next = position.words[position.index + 1];
+    if (next && !isOption(next.value)) {
+      const nested = classifyNode(position.words.slice(position.index + 1), depth + 1);
       if (nested.decision === "deny") return nested;
     }
   }

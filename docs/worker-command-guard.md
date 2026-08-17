@@ -76,7 +76,11 @@ The policy reads literal operands, so a path or a program the command only recei
 `find . -name .env -exec cat {} \;` and `find . -name .env | xargs cat` are allowed, because `.env` is a filter pattern there and `{}` is a placeholder - no operand names the file - while `cat .env` is refused.
 Refusing on the mere presence of the text would be worse: it would refuse `find . -name .env`, an ordinary search, and contradict the principle stated below that the guard never blocks work it has no opinion about.
 The same limit covers a filename or a command held in a variable, such as `sh -c "$CMD"`, which no static classifier can close.
-An inline shell or `eval` payload is classified whenever it is literal, in any option spelling; when it is assembled at runtime instead, a node that still mentions a perimeter command is refused rather than allowed.
+An inline payload - an `eval` payload or an inline-shell `-c` payload, in any option spelling - is extracted by its carrier and then classified by ONE shared path, so both carriers always reach the same verdict for the same payload text.
+That path classifies the text as written and expands nothing, so `bash -c "git -C $DIR log -1"` and `eval "git -C $DIR log -1"` are both ordinary work and both allowed.
+When a command word is itself an expansion, the operand immediately after it is classified as a command too, because that is what runs if the expansion is empty: `sh -c "$PREFIX chmod +x a"` and `eval "$PREFIX chmod +x a"` are both refused.
+A carrier that asked for an inline payload but whose own option grammar yielded none falls back on the ambiguity rule and refuses when the node mentions a perimeter command.
+The residue is a payload that names no command literally at all, such as `sh -c "$CMD"`, which is the same runtime limit as above.
 
 **Commands outside the reading and copying sets.**
 Those two sets are closed, so any command able to expose a file's contents that is absent from them passes.
