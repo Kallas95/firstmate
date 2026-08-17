@@ -20,7 +20,7 @@ Both application points are written per task by [`bin/fm-spawn.sh`](../bin/fm-sp
 That is what keeps the two from drifting: extending the perimeter means editing the rule tables in the policy owner and nothing else, and removing the policy owner changes both verdicts at once.
 `tests/fm-worker-command-guard.test.sh` pins that property as behavior rather than as a comment - it drives both live application points and asserts they follow the same owner.
 
-The transport also speaks the Codex, Grok, and Cursor payload and response shapes, so wiring one of those harnesses in needs a line in `fm-spawn.sh`, not a second copy of the rules.
+The transport also speaks the Codex, Grok, Cursor, and OpenCode payload and response shapes, so wiring one of those harnesses in needs a line in `fm-spawn.sh`, not a second copy of the rules.
 Until that line exists, the harness is unwired and `fm-spawn.sh` warns on every spawn onto it.
 
 ## The perimeter
@@ -33,7 +33,8 @@ Each rule below states what the guard refuses, not a complete guarantee that the
 - `chmod` - host file modes.
 - `git config --global` - the captain's host-wide git configuration.
 - `git rebase`, and a `git pull` carrying the isolated short option `-r`, the long option `--rebase`, or `--rebase=<value>` for any value other than `false`, which replays the same way - history the delivery path depends on.
-- `git push` whose destination ref resolves to `master` or `main`. Pushing the task branch, including `git push origin HEAD`, is deliberately untouched: work lands through a PR, so the ordinary push must keep working.
+- `git push` whose destination ref resolves to `master` or `main`, plus `git push --all` and `git push --mirror`, which carry those branches along without ever naming them.
+  Pushing the task branch, including `git push origin HEAD`, is deliberately untouched: work lands through a PR, so the ordinary push must keep working.
 - Reading a file whose basename is exactly `.env`, or carrying one elsewhere as the source of a copy or a move, through a shell command or through a harness file tool.
 
 `.env` is matched on the exact basename rather than on "contains env", because firstmate itself tracks ordinary files such as `config/x-mode.env` that a worker legitimately reads.

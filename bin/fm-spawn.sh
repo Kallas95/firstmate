@@ -176,6 +176,13 @@
 # resolver because `cursor` is not the CLI name. A cursor SECONDMATE instead runs
 # the tracked project-scope .cursor/hooks.json in its own home, whose stop-hook
 # park owns that home's supervision (docs/supervision-protocols/cursor.md).
+# Every crewmate or scout spawn also applies the worker command guard
+# (docs/worker-command-guard.md), which owns its perimeter and its contract:
+# claude, pi, and pi-signed get its two per-task application points and REFUSE
+# the spawn when its runtime is missing, while a spawn onto any other harness
+# warns that this worker starts with no command perimeter. A --secondmate spawn
+# is deliberately not wired, being a supervised firstmate instance rather than
+# an unattended worker.
 # On success prints: spawned <id> harness=<name> kind=<ship|scout|secondmate> [mode=<mode> yolo=<on|off>] window=<backend-target> worktree=<path>
 # A ship task records the explicit mode/yolo it was passed; a secondmate spawn records
 # mode=secondmate, yolo=off, home=, and projects=; a scout records neither, and both the
