@@ -167,18 +167,22 @@ function copySourceOperands(args) {
   return destinationIsTrailing ? operands.slice(0, -1) : operands;
 }
 
-// The operands a reading command actually opens. Only the one positional
-// operand that carries the pattern is dropped, and only when no option supplied
-// the pattern instead: every operand after it is a search target, and a file an
-// option names is a path, so `grep -f .env .`, `grep --file=.env .` and
-// `grep TODO .env` all stay inside the perimeter.
-function readTargets(name, args) {
-  if (!PATTERN_READING_COMMANDS.has(name)) return args;
+// The operands a reading command actually opens, and which of its arguments -
+// if any - its own grammar makes the pattern rather than a path. Only that one
+// positional operand is dropped, and only when no option supplied the pattern
+// instead: every operand after it is a search target, and a file an option names
+// is a path, so `grep -f .env .`, `grep --file=.env .` and `grep TODO .env` all
+// stay inside the perimeter. `patternIndex` is the sole answer to "which
+// argument is a pattern", so no caller works that out a second way.
+function readOperands(name, args) {
+  if (!PATTERN_READING_COMMANDS.has(name)) return { paths: args, patternIndex: -1 };
   const paths = [];
   let patternIsPositional = true;
+  let firstPositional = -1;
   for (let index = 0; index < args.length; index += 1) {
     const value = args[index];
     if (!isOption(value)) {
+      if (firstPositional < 0) firstPositional = index;
       paths.push(value);
       continue;
     }
@@ -191,7 +195,8 @@ function readTargets(name, args) {
     const namesFile = long ? long[1] === "file" : short[1] === "f";
     if (namesFile && carried !== undefined) paths.push(carried);
   }
-  return patternIsPositional ? paths.slice(1) : paths;
+  if (!patternIsPositional) return { paths, patternIndex: -1 };
+  return { paths: paths.slice(1), patternIndex: firstPositional };
 }
 
 // A harness file tool that only writes at the path it names exposes no secret,
@@ -318,10 +323,13 @@ function mentionsPerimeter(words) {
 //
 // find delimits its payload explicitly, so it is read exactly. xargs does not:
 // its option set is large and several options take a separate value, so rather
-// than resolve the boundary with a second option table this treats EVERY
-// non-option argument as the start of a candidate command. An option value that
+// than resolve the boundary with a second option table this treats a non-option
+// argument as the start of a candidate command. An xargs option value that
 // happens to name a perimeter command is then refused, which is the direction an
-// unresolvable spelling has to fall for a perimeter.
+// unresolvable spelling has to fall for a perimeter. What a candidate's own
+// grammar makes its PATTERN is not a candidate, though: `xargs grep -l ssh`
+// searches for that text and runs nothing, so refusing it would block ordinary
+// work exactly as the direct `grep -l ssh` never does.
 function carriedPrograms(position) {
   const name = basename(position.command.value);
   const words = position.words.slice(position.index + 1);
@@ -341,9 +349,14 @@ function carriedPrograms(position) {
   }
   if (name === "xargs") {
     const programs = [];
+    const patterns = new Set();
     for (let index = 0; index < words.length; index += 1) {
-      if (isOption(words[index].value)) continue;
-      programs.push(words.slice(index));
+      if (isOption(words[index].value) || patterns.has(index)) continue;
+      const carried = words.slice(index);
+      programs.push(carried);
+      const args = carried.slice(1).map((word) => word.value);
+      const { patternIndex } = readOperands(basename(carried[0].value), args);
+      if (patternIndex >= 0) patterns.add(index + 1 + patternIndex);
     }
     return programs;
   }
@@ -465,7 +478,9 @@ function classifyNode(node, depth) {
   if (denied) return deny(denied);
 
   const args = position.words.slice(position.index + 1).map((word) => word.value);
-  if (READING_COMMANDS.has(name) && readTargets(name, args).some(isDotenvPath)) return deny("dotenv-access");
+  if (READING_COMMANDS.has(name) && readOperands(name, args).paths.some(isDotenvPath)) {
+    return deny("dotenv-access");
+  }
   if (COPYING_COMMANDS.has(name) && copySourceOperands(args).some(isDotenvPath)) {
     return deny("dotenv-access");
   }

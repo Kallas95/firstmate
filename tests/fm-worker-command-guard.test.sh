@@ -259,6 +259,12 @@ matrix_case A65 allow - 'time -p rg chmod .'
 matrix_case A66 allow - 'time -p find . -name ssh'
 matrix_case A67 allow - 'for f in a; do time -p grep -l ssh $f; done'
 matrix_case A68 allow - 'if true; then time -p grep -rn chmod src/; fi'
+# A search carried by xargs is the same search: the operand its own grammar makes
+# the pattern is not another command, so searching a repository for references to
+# a perimeter command stays ordinary work.
+matrix_case A69 allow - 'git ls-files | xargs grep -l ssh'
+matrix_case A70 allow - 'find . -name "*.md" | xargs grep -n chmod'
+matrix_case A71 allow - 'xargs -a list.txt grep -l sudo'
 
 MATRIX_TMP=$(mktemp -d "${TMPDIR:-/tmp}/fm-worker-guard-matrix.XXXXXX")
 FM_TEST_CLEANUP_DIRS+=("$MATRIX_TMP")
