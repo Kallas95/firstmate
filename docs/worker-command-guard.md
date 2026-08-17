@@ -53,7 +53,8 @@ Within the perimeter above, a command is classified wherever the shared lexer ca
 - a direct command, and each stage of a pipeline or a list;
 - the body of a subshell or a brace group;
 - a command substitution, a backtick, or a process substitution;
-- the body of a compound statement - a `for`, `while`, `until` or `if` body, and a command behind `time`, with or without the keyword's own options;
+- the body of a compound statement - a `for`, `while`, `until` or `if` body;
+- a command behind `time`, bare or behind that keyword's boolean and attached-value options, and behind one option whose value sits in a separate token, as in `time -o log cat .env`;
 - a payload carried in another tool's arguments - `find -exec`, `-execdir`, `-ok`, `-okdir`, and `xargs`;
 - an inline shell payload (`sh -c`), an `eval` payload, and a wrapper payload such as `env -S`;
 - a file loaded through the sourcing builtins.
@@ -70,6 +71,12 @@ The perimeter applies to the command [`bin/fm-arm-command-policy.mjs`](../bin/fm
 Any other launcher swallows the command behind it, so `nice chmod +x a`, `nice -n 10 chmod +x a`, `stdbuf -o0 chmod +x a` and `setsid chmod +x a` are allowed today, while `nohup chmod +x a` and `timeout 5 chmod +x a` are refused.
 The same holds for a builtin that carries a command to run later: `trap "cat .env" EXIT` is allowed, while the payload of `find -exec` or `xargs` is classified.
 Extending that set is deliberately not done here: it is shared with the arm guard and the cd guard, whose behaviour is outside this change's scope.
+
+**A timing-keyword option whose value is followed by another option.**
+The operand right after the resolved command word is classified as a command too, because a dropped option's value can stand there.
+Only that one operand is, so when `time`'s option takes its value in a separate token AND another option follows that value, the real command is never resolved: `time -o log -a cat .env` and `time -o log -p chmod +x a` are allowed today, while `time -o log cat .env` and `time -a -o log cat .env` are refused.
+Widening the scan back would re-refuse an ordinary search whose pattern names a perimeter command, such as `time -p grep -rn ssh src/`, and nothing in the shape tells `log` from `grep` without a per-tool option table this guard deliberately does not keep.
+The daily cost of refusing ordinary searches outweighs a form a wandering worker does not spontaneously write, so the residue is accepted and named here rather than closed.
 
 **Paths and payloads produced at runtime.**
 The policy reads literal operands, so a path or a program the command only receives while running is invisible to it.
