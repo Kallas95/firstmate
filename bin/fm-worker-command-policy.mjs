@@ -167,16 +167,19 @@ function copySourceOperands(args) {
   return destinationIsTrailing ? operands.slice(0, -1) : operands;
 }
 
-// The operands a reading command actually opens, and which of its arguments -
-// if any - its own grammar makes the pattern rather than a path. Only that one
-// positional operand is dropped, and only when no option supplied the pattern
-// instead: every operand after it is a search target, and a file an option names
-// is a path, so `grep -f .env .`, `grep --file=.env .` and `grep TODO .env` all
-// stay inside the perimeter. `patternIndex` is the sole answer to "which
-// argument is a pattern", so no caller works that out a second way.
+// The operands a reading command actually opens, and which of its arguments its
+// own grammar makes a pattern rather than a path. The one positional operand
+// that carries the pattern is dropped, and only when no option supplied the
+// pattern instead: every operand after it is a search target, and a file an
+// option names is a path, so `grep -f .env .`, `grep --file=.env .` and
+// `grep TODO .env` all stay inside the perimeter. `patternIndexes` is the sole
+// answer to "which argument is a pattern", covering the positional operand and
+// the token a pattern-carrying option takes separately, so no caller works that
+// out a second way.
 function readOperands(name, args) {
-  if (!PATTERN_READING_COMMANDS.has(name)) return { paths: args, patternIndex: -1 };
+  if (!PATTERN_READING_COMMANDS.has(name)) return { paths: args, patternIndexes: [] };
   const paths = [];
+  const patternIndexes = [];
   let patternIsPositional = true;
   let firstPositional = -1;
   for (let index = 0; index < args.length; index += 1) {
@@ -191,12 +194,20 @@ function readOperands(name, args) {
     if (!long && !short) continue;
     patternIsPositional = false;
     const attached = long ? long[2] : short[2];
-    const carried = attached === undefined || attached === "" ? args[index += 1] : attached;
+    const detached = attached === undefined || attached === "";
+    const carried = detached ? args[index += 1] : attached;
     const namesFile = long ? long[1] === "file" : short[1] === "f";
-    if (namesFile && carried !== undefined) paths.push(carried);
+    if (namesFile) {
+      if (carried !== undefined) paths.push(carried);
+      continue;
+    }
+    if (detached && carried !== undefined) patternIndexes.push(index);
   }
-  if (!patternIsPositional) return { paths, patternIndex: -1 };
-  return { paths: paths.slice(1), patternIndex: firstPositional };
+  if (!patternIsPositional) return { paths, patternIndexes };
+  return {
+    paths: paths.slice(1),
+    patternIndexes: firstPositional < 0 ? [] : [firstPositional],
+  };
 }
 
 // A harness file tool that only writes at the path it names exposes no secret,
@@ -355,8 +366,8 @@ function carriedPrograms(position) {
       const carried = words.slice(index);
       programs.push(carried);
       const args = carried.slice(1).map((word) => word.value);
-      const { patternIndex } = readOperands(basename(carried[0].value), args);
-      if (patternIndex >= 0) patterns.add(index + 1 + patternIndex);
+      const { patternIndexes } = readOperands(basename(carried[0].value), args);
+      for (const offset of patternIndexes) patterns.add(index + 1 + offset);
     }
     return programs;
   }

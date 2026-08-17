@@ -265,6 +265,10 @@ matrix_case A68 allow - 'if true; then time -p grep -rn chmod src/; fi'
 matrix_case A69 allow - 'git ls-files | xargs grep -l ssh'
 matrix_case A70 allow - 'find . -name "*.md" | xargs grep -n chmod'
 matrix_case A71 allow - 'xargs -a list.txt grep -l sudo'
+# The pattern is the pattern whichever way the search spells it, so the verdict
+# does not depend on whether an option carried it.
+matrix_case A72 allow - 'git ls-files | xargs grep -e ssh'
+matrix_case A73 allow - 'git ls-files | xargs egrep -e chmod'
 
 MATRIX_TMP=$(mktemp -d "${TMPDIR:-/tmp}/fm-worker-guard-matrix.XXXXXX")
 FM_TEST_CLEANUP_DIRS+=("$MATRIX_TMP")

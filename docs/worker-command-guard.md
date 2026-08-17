@@ -32,7 +32,7 @@ Each rule below states what the guard refuses, not a complete guarantee that the
 - `ssh`, `scp`, `rsync` - reaching or moving data to another host.
 - `chmod` - host file modes.
 - `git config --global` - the captain's host-wide git configuration.
-- `git rebase`, and `git pull --rebase` which replays the same way - history the delivery path depends on.
+- `git rebase`, and a `git pull` carrying the isolated short option `-r`, the long option `--rebase`, or `--rebase=<value>` for any value other than `false`, which replays the same way - history the delivery path depends on.
 - `git push` whose destination ref resolves to `master` or `main`. Pushing the task branch, including `git push origin HEAD`, is deliberately untouched: work lands through a PR, so the ordinary push must keep working.
 - Reading a file whose basename is exactly `.env`, or carrying one elsewhere as the source of a copy or a move, through a shell command or through a harness file tool.
 
@@ -77,6 +77,11 @@ The operand right after the resolved command word is classified as a command too
 Only that one operand is, so when `time`'s option takes its value in a separate token AND another option follows that value, the real command is never resolved: `time -o log -a cat .env` and `time -o log -p chmod +x a` are allowed today, while `time -o log cat .env` and `time -a -o log cat .env` are refused.
 Widening the scan back would re-refuse an ordinary search whose pattern names a perimeter command, such as `time -p grep -rn ssh src/`, and nothing in the shape tells `log` from `grep` without a per-tool option table this guard deliberately does not keep.
 The daily cost of refusing ordinary searches outweighs a form a wandering worker does not spontaneously write, so the residue is accepted and named here rather than closed.
+
+**A rebasing pull written as a combined short-option cluster.**
+The pull rule reads `-r` only as its own token, so the same option written inside a cluster is not classified as history-rewriting even though the branch is replayed.
+`git pull -qr origin main` and `git pull -rq origin main` are allowed today, while `git pull -q -r origin main` is refused; a disposable repository confirmed the cluster form really rebases, producing no merge commit and a rewritten local sha.
+This is the same combined-cluster shape the policy does close elsewhere, for a copy's target-directory option and for an inline shell's `-c`, so the asymmetry is known rather than an oversight: the pull branch was frozen with the rest of the classifier before it got the same treatment.
 
 **Paths and payloads produced at runtime.**
 The policy reads literal operands, so a path or a program the command only receives while running is invisible to it.
