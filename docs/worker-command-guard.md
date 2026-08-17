@@ -26,6 +26,7 @@ Until that line exists, the harness is unwired and `fm-spawn.sh` warns on every 
 ## The perimeter
 
 Stated here for readers; the policy owner's rule tables are authoritative.
+Each rule below states what the guard refuses, not a complete guarantee that the action cannot happen: read it with the deliberate boundaries further down.
 
 - `sudo` - privilege escalation.
 - `ssh`, `scp`, `rsync` - reaching or moving data to another host.
@@ -59,12 +60,15 @@ Within the perimeter above, a command is classified wherever the shared lexer ca
 
 ## Deliberate boundaries
 
-Three classes are outside what this guard classifies.
-Each is a real gap, verified against the policy owner, not a theoretical one.
+**The classes below are the ones known and verified to date, and this list is NOT exhaustive by nature.**
+A guard built by enumerating shell forms cannot know the complete list of its own gaps, and successive reviews of this very file have each found a class the previous wording had frozen as complete.
+Read the list as evidence that gaps exist and are named as they are found, never as a boundary around them.
+Each entry is a real gap, verified against the policy owner, not a theoretical one.
 
 **Command runners the shared classifier does not model.**
 The perimeter applies to the command [`bin/fm-arm-command-policy.mjs`](../bin/fm-arm-command-policy.mjs) resolves, and its wrapper set is closed: `exec`, `command`, `sudo`, `nohup`, `env`, `timeout`, `gtimeout`.
 Any other launcher swallows the command behind it, so `nice chmod +x a`, `nice -n 10 chmod +x a`, `stdbuf -o0 chmod +x a` and `setsid chmod +x a` are allowed today, while `nohup chmod +x a` and `timeout 5 chmod +x a` are refused.
+The same holds for a builtin that carries a command to run later: `trap "cat .env" EXIT` is allowed, while the payload of `find -exec` or `xargs` is classified.
 Extending that set is deliberately not done here: it is shared with the arm guard and the cd guard, whose behaviour is outside this change's scope.
 
 **Paths and payloads produced at runtime.**
@@ -73,6 +77,11 @@ The policy reads literal operands, so a path or a program the command only recei
 Refusing on the mere presence of the text would be worse: it would refuse `find . -name .env`, an ordinary search, and contradict the principle stated below that the guard never blocks work it has no opinion about.
 The same limit covers a filename or a command held in a variable, such as `sh -c "$CMD"`, which no static classifier can close.
 An inline shell or `eval` payload is classified whenever it is literal, in any option spelling; when it is assembled at runtime instead, a node that still mentions a perimeter command is refused rather than allowed.
+
+**Commands outside the reading and copying sets.**
+Those two sets are closed, so any command able to expose a file's contents that is absent from them passes.
+`gzip -c .env`, `tar cf - .env`, `dd if=.env`, `wc -l .env` and `jq . .env` are each allowed today, while `cat .env`, `diff .env x`, `hexdump -C .env` and `source .env` are refused.
+Adding these one by one is deliberately not done: it would restart the form-by-form enumeration this guard's design decided against, and the sets would stay closed all the same.
 
 **The bodies of scripts a submitted command would run.**
 The policy classifies the command a worker submits.
