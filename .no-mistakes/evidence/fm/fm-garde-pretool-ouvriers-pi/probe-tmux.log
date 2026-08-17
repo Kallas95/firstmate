@@ -1,0 +1,12 @@
+display-message -p #S
+list-windows -t firstmate -F #{window_name}
+new-window -dP -F #{window_id} -t firstmate: -n fm-probe -c /var/folders/5q/snmnm0_926ddy6xlmggzx1g80000gn/T/fm-guard-probe.s1jfgf/project
+set-window-option -t  automatic-rename off
+set-window-option -t  allow-rename off
+send-keys -t firstmate:fm-probe treehouse get Enter
+display-message -p -t firstmate:fm-probe #{pane_current_path}
+display-message -p -t firstmate:fm-probe #{pane_current_path}
+send-keys -t firstmate:fm-probe export GOTMPDIR=/tmp/fm-probe/gotmp Enter
+send-keys -t firstmate:fm-probe -l env -u CURSOR_AGENT -u CURSOR_INVOKED_AS FM_PI_HARNESS=pi '/var/folders/5q/snmnm0_926ddy6xlmggzx1g80000gn/T//fm-guard-probe.s1jfgf/fake/fakebin/pi' -e '/var/folders/5q/snmnm0_926ddy6xlmggzx1g80000gn/T//fm-guard-probe.s1jfgf/home/state/probe.pi-ext.ts' "$('/Users/max/.no-mistakes/worktrees/0e7dd249bdb3/01M0661VCBQHY15G5DFADMST6B/bin/fm-operational-input.sh' encode launch-brief < '/var/folders/5q/snmnm0_926ddy6xlmggzx1g80000gn/T//fm-guard-probe.s1jfgf/home/data/probe/brief.md')"
+display-message -p -t firstmate:fm-probe #{pane_id}
+send-keys -t firstmate:fm-probe Enter
