@@ -351,6 +351,25 @@ test_bare_corr_prefix_reserved_key_vocabulary_passes() {
   pass "a bare corr prefix does not block a reserved pending-reply key's vocabulary"
 }
 
+test_bare_corr_prefix_tolerates_a_whitespace_run_before_key() {
+  local dir expected
+  dir=$(case_dir bare-corr-spacing)
+  # The gap between the corr token and "[key=" is a whitespace RUN, exactly as
+  # the keyless head trim tolerates: two spaces (or tab+space) must not mask
+  # the stated key one space away from the single-space form.
+  printf 'blocked: corr=9c91ae0ff46cdca1  [key=instructions-non-parvenues] cause\n' \
+    > "$dir/two.status"
+  expected=$(printf 'instructions-non-parvenues\tblocked\tcause\n')
+  assert_fold "$dir/two.status" "$expected" "two spaces between corr and the stated key"
+  printf 'resolved [key=instructions-non-parvenues]: corrigee\n' >> "$dir/two.status"
+  assert_fold "$dir/two.status" "" "two-space bare-corr open closed by resolved"
+
+  printf 'blocked: corr=9c91ae0ff46cdca1\t [key=instructions-non-parvenues] cause\n' \
+    > "$dir/tab.status"
+  assert_fold "$dir/tab.status" "$expected" "tab+space between corr and the stated key"
+  pass "a whitespace run between corr and the stated [key=...] is still skipped"
+}
+
 test_stated_key_is_honored_in_both_positions
 test_bare_keyless_line_still_folds_to_default
 test_resolution_closes_across_positions
@@ -369,3 +388,4 @@ test_bare_corr_prefix_open_closed_by_resolved
 test_bare_corr_prefix_key_stays_open_when_unresolved
 test_bare_corr_prefix_does_not_swallow_mid_note_prose
 test_bare_corr_prefix_reserved_key_vocabulary_passes
+test_bare_corr_prefix_tolerates_a_whitespace_run_before_key

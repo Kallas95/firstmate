@@ -213,7 +213,7 @@ _fm_key_before_colon() {  # <status-line>
 # status_line_note so the note strips the same metadata, keeping the colon-first
 # note identical to the before-colon form.
 _fm_note_skip_leading_corr() {  # <note> -> note with a leading corr=<hex> dropped iff [key= follows
-  local note=$1 first
+  local note=$1 first rest
   first=${note%%[[:space:]]*}
   case "$first" in
     corr=[0-9A-Fa-f]*)
@@ -226,11 +226,10 @@ _fm_note_skip_leading_corr() {  # <note> -> note with a leading corr=<hex> dropp
           # deeper in the note stays prose
           # (test_mid_note_prose_mention_is_not_a_stated_key) and a corr-only
           # note keeps its correlation value in the displayed text.
-          case "$note" in
-            "$first"[[:space:]]\[key=*)
-              note=${note#"$first"}
-              note=${note#"${note%%[![:space:]]*}"}
-              ;;
+          rest=${note#"$first"}
+          rest=${rest#"${rest%%[![:space:]]*}"}
+          case "$rest" in
+            \[key=*) note=$rest ;;
           esac
           ;;
       esac
@@ -480,7 +479,7 @@ _fm_open_decisions_cursor_path() {  # <status-file>
   printf '%s/.%s.open-decisions-cursor' "$dir" "${base%.status}"
 }
 
-FM_OPEN_DECISIONS_FOLD_VERSION=4
+FM_OPEN_DECISIONS_FOLD_VERSION=5
 
 # Portable device:inode identity for the rotation/recreation check below.
 _fm_open_decisions_file_ident() {  # <file> -> "dev:inode", empty on I/O failure
