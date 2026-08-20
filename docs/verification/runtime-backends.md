@@ -940,9 +940,9 @@ An absent probe file and a reading stamped three hours earlier each rendered `ol
 The reserve is read from the private `srv-ollama-usage-watch` probe's `state/ollama-usage.json`; firstmate never measures that quota a second time.
 `quota-axi` does not model this provider, which is why the probe exists.
 
-The portable regression is `tests/fm-pi-ollama-reserve.test.sh`, which runs the real `fm-spawn` and drives the generated artifact in a plain Node host.
-Refresh this harness-dependent proof before accepting a Pi upgrade, since only Pi decides where a status entry lands:
+The portable regression is `tests/fm-pi-ollama-reserve.test.sh`, which runs the real `fm-spawn` and drives the generated artifact in a plain Node host, pinning the reserve logic everywhere.
+Refresh this harness-dependent proof with the env-gated live guard before accepting a Pi upgrade, since only Pi decides where a status entry lands:
 
 ```sh
-bin/fm-test-run.sh tests/fm-pi-ollama-reserve.test.sh
+FM_PI_FOOTER_LIVE_E2E=1 bin/fm-test-run.sh tests/fm-pi-footer-live-e2e.test.sh
 ```
