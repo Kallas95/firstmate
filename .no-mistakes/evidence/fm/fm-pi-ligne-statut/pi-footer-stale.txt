@@ -1,0 +1,22 @@
+ pi v0.84.2
+ escape interrupt · ctrl+c/ctrl+d clear/exit · / commands · ! bash · ctrl+o more
+ Press ctrl+o to show full startup help and loaded resources.
+
+ Pi can explain its own features and look up its docs. Ask it how to use or extend Pi.
+
+[Extensions]
+  olla-evidence-stale.pi-ext.ts
+
+
+ Warning: No models available. Use /login to log into a provider via OAuth or API key. See:
+   /Users/max/.local/share/fnm/node-versions/v22.23.2/installation/lib/node_modules/@earendil-works/pi-coding-agent/docs/providers.md
+   /Users/max/.local/share/fnm/node-versions/v22.23.2/installation/lib/node_modules/@earendil-works/pi-coding-agent/docs/models.md
+
+ Warning: tmux extended-keys is off. Modified Enter keys may not work. Add `set -g extended-keys on` to ~/.tmux.conf and restart tmux.
+
+────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+
+────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+/private/var/folders/5q/snmnm0_926ddy6xlmggzx1g80000gn/T/fm-pi-footer-evidence.VkG9Dk/stale/wt (wt-stale)
+0.0%/0 (auto)                                                                                                                        unknown
+olla ?
