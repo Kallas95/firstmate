@@ -282,11 +282,14 @@ with open(target, "w") as handle:
 PY
 }
 
-# drive_ext <ext-path> <event>: load the generated extension in a plain Node
-# host, fire one lifecycle event with a RECORDING Pi context, and print every
-# interaction it attempted, one "<surface> <detail>" line each.
+# drive_ext <ext-path> <event> [expected-call]: load the generated extension in
+# a plain Node host, fire one lifecycle event with a RECORDING Pi context, and
+# print every interaction it attempted, one "<surface> <detail>" line each.
+# The reserve segment loads its module lazily, so the driver waits (bounded)
+# for the expected call to be recorded - or, with no expectation, for the
+# recording to go quiet - before printing.
 drive_ext() {
-  EXT_PATH="$1" EVENT="$2" node --input-type=module 2>&1 <<'JS'
+  EXT_PATH="$1" EVENT="$2" EXPECT="${3:-}" node --input-type=module 2>&1 <<'JS'
 import { pathToFileURL } from "node:url";
 
 const calls = [];
@@ -320,8 +323,26 @@ mod.default({
 const handler = handlers[process.env.EVENT];
 if (!handler) throw new Error("no handler for " + process.env.EVENT);
 await handler({}, ctx);
-// The reserve segment loads its module lazily, so let that settle.
-await new Promise((resolve) => setTimeout(resolve, 400));
+// On a lapsed deadline the recorded calls are still printed, so a real
+// regression reports what actually happened instead of looking like a timeout.
+const deadline = Date.now() + 5000;
+const tick = () => new Promise((resolve) => setTimeout(resolve, 25));
+const expected = process.env.EXPECT || "";
+if (expected) {
+  while (Date.now() < deadline && !calls.some((line) => line.includes(expected))) {
+    await tick();
+  }
+} else {
+  let seen = calls.length;
+  let quietSince = Date.now();
+  while (Date.now() < deadline && Date.now() - quietSince < 400) {
+    await tick();
+    if (calls.length !== seen) {
+      seen = calls.length;
+      quietSince = Date.now();
+    }
+  }
+}
 console.log(calls.join("\n"));
 JS
 }
@@ -334,7 +355,8 @@ test_generated_extension_publishes_the_reserve_from_the_home_probe() {
   ext=${rec#*|}
   write_probe "$home" 0.851 0.924 60
 
-  out=$(drive_ext "$ext" session_start) || fail "session_start drive failed: $out"
+  out=$(drive_ext "$ext" session_start "ui.setStatus fm-ollama ") \
+    || fail "session_start drive failed: $out"
   assert_contains "$out" "ui.setStatus fm-ollama olla 85%" \
     "the generated extension did not publish the reserve read from this home's probe"
 
@@ -355,7 +377,8 @@ test_generated_extension_renders_an_unknown_rather_than_a_stale_figure() {
   home=${rec%%|*}
   ext=${rec#*|}
   assert_absent "$home/state/ollama-usage.json" "the absent case must start with no probe file"
-  out=$(drive_ext "$ext" session_start) || fail "absent-probe drive failed: $out"
+  out=$(drive_ext "$ext" session_start "ui.setStatus fm-ollama ") \
+    || fail "absent-probe drive failed: $out"
   assert_contains "$out" "ui.setStatus fm-ollama olla ?" \
     "an absent probe file must publish an explicit unknown"
 
@@ -365,12 +388,80 @@ test_generated_extension_renders_an_unknown_rather_than_a_stale_figure() {
   # Well past the shelf life: the probe refreshes on a five-minute sweep, so a
   # reading this old means the sweep is not running.
   write_probe "$home" 0.851 0.924 10800
-  out=$(drive_ext "$ext" session_start) || fail "stale-probe drive failed: $out"
+  out=$(drive_ext "$ext" session_start "ui.setStatus fm-ollama ") \
+    || fail "stale-probe drive failed: $out"
   assert_contains "$out" "ui.setStatus fm-ollama olla ?" \
     "a stale probe reading must publish an explicit unknown"
   assert_not_contains "$out" "olla 85%" \
     "a stale probe reading must never be presented as current"
   pass "an absent or stale probe reading publishes an explicit unknown, never a figure"
+}
+
+# Pi's in-process session replacement (/new, /resume, fork) clears its
+# extension-status store while reusing the already-loaded extension module, so
+# a second session_start on the SAME instance must publish the reserve again
+# even though the rendered text has not changed. The recorder mirrors the
+# cleared store by dropping everything recorded before the replacement.
+test_generated_extension_republishes_after_session_replacement() {
+  require_node "the generated Pi extension session-replacement test" || return 0
+  local rec home ext out
+  rec=$(spawn_pi_case reserve-replace olla-replace)
+  home=${rec%%|*}
+  ext=${rec#*|}
+  write_probe "$home" 0.851 0.924 60
+
+  out=$(EXT_PATH="$ext" node --input-type=module 2>&1 <<'JS'
+import { pathToFileURL } from "node:url";
+
+const calls = [];
+const ui = new Proxy(
+  {},
+  {
+    has: () => true,
+    get: (_target, prop) => {
+      if (typeof prop !== "string") return undefined;
+      if (prop === "theme") return { fg: (_name, text) => text };
+      return (...args) => {
+        calls.push("ui." + prop + " " + args.join(" "));
+      };
+    },
+  },
+);
+const ctx = { ui, isIdle: () => true };
+
+const handlers = {};
+const mod = await import(pathToFileURL(process.env.EXT_PATH).href);
+mod.default({
+  on: (name, fn) => {
+    handlers[name] = fn;
+  },
+});
+
+const waitForPublish = async () => {
+  const deadline = Date.now() + 5000;
+  while (
+    Date.now() < deadline &&
+    !calls.some((line) => line.includes("ui.setStatus fm-ollama "))
+  ) {
+    await new Promise((resolve) => setTimeout(resolve, 25));
+  }
+};
+
+await handlers.session_start({}, ctx);
+await waitForPublish();
+const first = calls.splice(0, calls.length);
+if (!first.some((line) => line.includes("ui.setStatus fm-ollama "))) {
+  throw new Error("first session_start never published: " + JSON.stringify(first));
+}
+
+await handlers.session_start({}, ctx);
+await waitForPublish();
+console.log(calls.map((line) => "replacement " + line).join("\n"));
+JS
+  ) || fail "session-replacement drive failed: $out"
+  assert_contains "$out" "replacement ui.setStatus fm-ollama olla 85%" \
+    "a replacement session_start was swallowed by the publish-on-change cache"
+  pass "a replacement session_start republishes the reserve into the cleared store"
 }
 
 test_generated_extension_keeps_supervision_wiring_when_the_reserve_cannot_load() {
@@ -419,7 +510,8 @@ test_generated_extension_keeps_the_turn_end_notification() {
   marker="$home/state/olla-turnend.turn-ended"
   assert_absent "$marker" "a fresh spawn must not already carry a turn-end notification"
 
-  out=$(drive_ext "$ext" turn_end) || fail "turn_end drive failed: $out"
+  out=$(drive_ext "$ext" turn_end "ui.setStatus fm-ollama ") \
+    || fail "turn_end drive failed: $out"
   assert_present "$marker" "the reserve segment displaced the turn-end notification"
   assert_contains "$out" "ui.setStatus fm-ollama olla 40%" \
     "turn_end must also refresh the reserve so a long session stays current"
@@ -431,6 +523,7 @@ test_module_refuses_to_present_an_untrustworthy_reading_as_current
 test_module_reader_never_throws_on_a_failing_read
 test_generated_extension_publishes_the_reserve_from_the_home_probe
 test_generated_extension_renders_an_unknown_rather_than_a_stale_figure
+test_generated_extension_republishes_after_session_replacement
 test_generated_extension_keeps_supervision_wiring_when_the_reserve_cannot_load
 test_generated_extension_keeps_the_turn_end_notification
 

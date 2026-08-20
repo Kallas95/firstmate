@@ -2491,6 +2491,10 @@ export default function (pi: any) {
     execFile("touch", ["$TURNEND"]);
   });
   pi.on("session_start", (_event: any, ctx: any) => {
+    // A replacement session (/new, /resume, fork) clears Pi's extension-status
+    // store while reusing this loaded module, so the cached text must be
+    // dropped or the publish-on-change guard would skip the emptied store.
+    reserveText = null;
     void renderReserve(ctx);
     // A worker can idle for hours; without this the last reading would stay on
     // screen past its shelf life and read as current. Unref'd so the segment
