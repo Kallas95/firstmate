@@ -1,0 +1,31 @@
+
+============ JOURNAL REEL: extrait des lignes 47-48 (la forme signalee) ============
+blocked: corr=9c91ae0ff46cdca1 [key=instructions-non-parvenues] AGENTS.md relu depuis le disque: il est OCTET POUR OCTET
+resolved [key=instructions-non-parvenues]: corr=b4085b6e7dee032e cause corrigee et prise en compte: mon bail de home est
+
+============ PLI BRUT status_open_decisions - AVANT correctif (lib de base) ============
+default	blocked	corr=9c91ae0ff46cdca1 [key=instructions-non-parvenues] AGENTS.md relu depuis le disque: il est OCTET POUR OCTET identique a 
+
+============ PLI BRUT status_open_decisions - APRES correctif (lib corrigee) ============
+(pli vide)
+
+============ AVANT - lecteur 1: fm-wake-drain.sh sur le journal reel ============
+UNREAD STATUS (new since last drain, not re-printed after this presentation):
+maxisport resolved [key=pending-reply-24b00d3d6a6fe5d1]: pending-reply-resolved: task=maxisport pending-reply-id=24b00d3d6a6fe5d1 via=status
+OPEN DECISIONS (still open, folded from the durable status logs - not just the latest line):
+maxisport blocked: corr=9c91ae0ff46cdca1 [key=instructions-non-parvenues] AGENTS.md relu depuis le disque: il est OCTET POUR OCTET identique a celui que je portais deja (md5 f587b93c14a37e04de4e1c639f6e77dc, [truncated]
+OPEN DECISIONS: close one by answering it: bin/fm-send.sh <task> --resolve-key <key> '<answer>'
+[rc=0]
+
+============ AVANT - lecteur 2: fm-send maxisport --resolve-key instructions-non-parvenues ============
+error: --resolve-key 'instructions-non-parvenues': no open decision or blocker with that key in /var/folders/5q/snmnm0_926ddy6xlmggzx1g80000gn/T/fm-e2e-journal-reel-demo/home-base/state/maxisport.status, and no active captain decision maxisport-decision-instructions-non-parvenues (already closed or mistyped). Re-check the OPEN DECISIONS listing, then resend without that key or with the right one; nothing was sent.
+[rc=1]
+
+============ APRES - lecteur 1: fm-wake-drain.sh sur le journal reel ============
+UNREAD STATUS (new since last drain, not re-printed after this presentation):
+maxisport resolved [key=pending-reply-24b00d3d6a6fe5d1]: pending-reply-resolved: task=maxisport pending-reply-id=24b00d3d6a6fe5d1 via=status
+[rc=0]
+
+============ APRES - lecteur 2: fm-send maxisport --resolve-key instructions-non-parvenues ============
+error: --resolve-key 'instructions-non-parvenues': no open decision or blocker with that key in /var/folders/5q/snmnm0_926ddy6xlmggzx1g80000gn/T/fm-e2e-journal-reel-demo/home-fixe/state/maxisport.status, and no active captain decision maxisport-decision-instructions-non-parvenues (already closed or mistyped). Re-check the OPEN DECISIONS listing, then resend without that key or with the right one; nothing was sent.
+[rc=1]

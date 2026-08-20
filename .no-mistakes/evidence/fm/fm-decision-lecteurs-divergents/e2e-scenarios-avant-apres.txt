@@ -1,0 +1,52 @@
+
+============ JOURNAL state/maxisport.status (ouvert par blocked, ferme par resolved) ============
+blocked: corr=9c91ae0ff46cdca1 [key=instructions-non-parvenues] AGENTS.md relu, aucune instruction recue
+resolved [key=instructions-non-parvenues]: corr=b4085b6e7dee032e instructions transmises et confirmees
+
+============ AVANT correctif - lecteur 1: fm-wake-drain.sh (pli OPEN DECISIONS) ============
+OPEN DECISIONS (still open, folded from the durable status logs - not just the latest line):
+maxisport blocked: corr=9c91ae0ff46cdca1 [key=instructions-non-parvenues] AGENTS.md relu, aucune instruction recue
+OPEN DECISIONS: close one by answering it: bin/fm-send.sh <task> --resolve-key <key> '<answer>'
+WARNING: watcher still down (same stale episode; last beat: never, grace 300s) - full banner already printed this episode.
+[drain rc=0]
+
+============ AVANT correctif - lecteur 2: fm-send maxisport --resolve-key instructions-non-parvenues ============
+WARNING: watcher still down (same stale episode; last beat: never, grace 300s) - full banner already printed this episode.
+error: --resolve-key 'instructions-non-parvenues': no open decision or blocker with that key in /var/folders/5q/snmnm0_926ddy6xlmggzx1g80000gn/T/fm-e2e-deux-lecteurs-demo/home-resolu/state/maxisport.status, and no active captain decision maxisport-decision-instructions-non-parvenues (already closed or mistyped). Re-check the OPEN DECISIONS listing, then resend without that key or with the right one; nothing was sent.
+[fm-send rc=1]
+
+============ APRES correctif - lecteur 1: fm-wake-drain.sh (pli OPEN DECISIONS) ============
+WARNING: watcher still down (same stale episode; last beat: never, grace 300s) - full banner already printed this episode.
+[drain rc=0]
+
+============ APRES correctif - lecteur 2: fm-send maxisport --resolve-key instructions-non-parvenues ============
+WARNING: watcher still down (same stale episode; last beat: never, grace 300s) - full banner already printed this episode.
+error: --resolve-key 'instructions-non-parvenues': no open decision or blocker with that key in /var/folders/5q/snmnm0_926ddy6xlmggzx1g80000gn/T/fm-e2e-deux-lecteurs-demo/home-resolu/state/maxisport.status, and no active captain decision maxisport-decision-instructions-non-parvenues (already closed or mistyped). Re-check the OPEN DECISIONS listing, then resend without that key or with the right one; nothing was sent.
+[fm-send rc=1]
+
+============ JOURNAL non resolu (cle reellement ouverte, aucun resolved) ============
+blocked: corr=9c91ae0ff46cdca1 [key=instructions-non-parvenues] AGENTS.md relu, aucune instruction recue
+
+============ AVANT correctif - lecteur 1: drain (la cle enoncee est masquee -> default) ============
+OPEN DECISIONS (still open, folded from the durable status logs - not just the latest line):
+maxisport blocked: corr=9c91ae0ff46cdca1 [key=instructions-non-parvenues] AGENTS.md relu, aucune instruction recue
+OPEN DECISIONS: close one by answering it: bin/fm-send.sh <task> --resolve-key <key> '<answer>'
+WARNING: watcher still down (same stale episode; last beat: never, grace 300s) - full banner already printed this episode.
+[drain rc=0]
+
+============ AVANT correctif - lecteur 2: fm-send --resolve-key (refuse la cle enoncee) ============
+WARNING: watcher still down (same stale episode; last beat: never, grace 300s) - full banner already printed this episode.
+error: --resolve-key 'instructions-non-parvenues': no open decision or blocker with that key in /var/folders/5q/snmnm0_926ddy6xlmggzx1g80000gn/T/fm-e2e-deux-lecteurs-demo/home-ouvert/state/maxisport.status, and no active captain decision maxisport-decision-instructions-non-parvenues (already closed or mistyped). Re-check the OPEN DECISIONS listing, then resend without that key or with the right one; nothing was sent.
+[fm-send rc=1]
+
+============ APRES correctif - lecteur 1: drain (la cle enoncee est listee ouverte) ============
+OPEN DECISIONS (still open, folded from the durable status logs - not just the latest line):
+maxisport [key=instructions-non-parvenues] blocked: AGENTS.md relu, aucune instruction recue
+OPEN DECISIONS: close one by answering it: bin/fm-send.sh <task> --resolve-key <key> '<answer>'
+WARNING: watcher still down (same stale episode; last beat: never, grace 300s) - full banner already printed this episode.
+[drain rc=0]
+
+============ APRES correctif - lecteur 2: fm-send --resolve-key (la porte de refus passe; seule la livraison tmux echoue dans ce bac a sable) ============
+WARNING: watcher still down (same stale episode; last beat: never, grace 300s) - full banner already printed this episode.
+error: text not sent to sess:fm-maxisport (tmux send failed; tried meta=/var/folders/5q/snmnm0_926ddy6xlmggzx1g80000gn/T/fm-e2e-deux-lecteurs-demo/home-ouvert/state/maxisport.meta; backend=from-meta)
+[fm-send rc=1]

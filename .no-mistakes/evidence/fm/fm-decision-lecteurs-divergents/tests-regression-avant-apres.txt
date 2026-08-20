@@ -1,0 +1,39 @@
+============ Tests de reproduction contre la lib AVANT correctif (base 1cb900c) ============
+(fichier de test du worktree execute dans l arbre de base: la premiere reproduction echoue)
+ok - the incremental fold matches the full fold across appends in both key positions
+not ok - bare corr prefix opens under the stated key: full fold mismatch: got 'default	blocked	corr=9c91ae0ff46cdca1 [key=instructions-non-parvenues] AGENTS.md relu' want 'instructions-non-parvenues	blocked	AGENTS.md relu'
+
+============ Suite complete tests/fm-classify-decision-key.test.sh APRES correctif ============
+ok - a stated [key=X] opens X whether it precedes or follows the verb colon
+ok - a keyless needs-decision still opens and closes the default key
+ok - a resolution closes its decision regardless of either line's key position
+ok - blocked [key=X] opens X in both key positions
+ok - two colon-form keyed decisions never collapse into one shared bucket
+ok - a [key=x] mentioned mid-note is prose, never an opened or closed key
+ok - a malformed stated key is rejected in both positions, never folded as default
+ok - status_line_verb strips every bracket tag before the colon, in any order, and recovers the bare verb
+ok - a [corr=...] tag ahead of [key=...] no longer swallows the verb: opens and closes under the stated key
+ok - a [corr=...] tag with no stated key opens under 'default', exactly like a bare needs-decision line
+ok - a [key=x] tag alone (no corr tag) still opens x - no regression from the tag-stripping fix
+ok - blocked/resolved parse their bare verb with any bracket-tag order preceding the colon
+ok - the incremental fold matches the full fold across appends in both key positions
+ok - a leading bare corr=<hex> token no longer masks the stated [key=...]
+ok - a decision closed by a later resolved is CLOSED regardless of either corr
+ok - a truly open bare-corr decision is still surfaced as open under the stated key
+ok - the corr skip stays narrow: mid-note prose and non-hex corr are not keys
+ok - a bare corr prefix does not block a reserved pending-reply key's vocabulary
+ok - a whitespace run between corr and the stated [key=...] is still skipped
+
+============ Suite tests/fm-wake-drain-open-decisions.test.sh APRES correctif ============
+ok - a needs-decision buried under later routine/other-key lines still reports as open
+ok - an over-long open decision is cut to its per-item budget with the shared truncation marker
+ok - an explicit resolved [key=X] closes the keyed decision
+ok - a later unrelated terminal line never clears an open decision
+ok - a reserved decision key can only be opened or closed by its owning library
+ok - no open decisions across the fleet prints nothing
+ok - the open-decision section is fleet-wide, not scoped to this drain's own queued records
+ok - a buried open decision surfaces even when the wake queue itself is empty
+ok - the fleet-wide decision scan does not follow status symlinks
+
+============ Nouveau test de migration du curseur v4 (extrait, APRES correctif) ============
+ok - a pre-fix v4 cursor's ghost default decision is refolded closed
