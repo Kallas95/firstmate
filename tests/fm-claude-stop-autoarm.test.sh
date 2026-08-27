@@ -514,6 +514,95 @@ test_detached_chain_keeps_homes_independent() {
   pass "auto-arm: two homes on one machine stay independent under the session-identity proof"
 }
 
+# --- returning from away mode -------------------------------------------------
+# The measured shape (2026-08-27): an away-mode episode left the epoch ledger on
+# a terminal "afk" outcome whose owner was long dead, the captain returned, and
+# the Stop-owned auto-arm then never claimed the home again. The model re-armed
+# the watcher by hand 175 times over five hours while every turn boundary
+# blocked. These cases pin the two independent things that must hold at the
+# first Stop after the return: a terminal ledger entry left by that episode is
+# not a claim to defer to, and a home whose lock records a DIFFERENT process of
+# this same session is still this session's home.
+
+# Write the durable session binding beside a home's lock: <dir> <pid> <session>.
+bind_session_identity() {
+  printf 'pid=%s\nsession=%s\n' "$2" "$3" > "$1/state/.lock.session"
+}
+
+# Start a live process the fake harness owns, reachable from nothing the hook
+# runs under. Prints its pid; the caller must reap it. This is the pool worker
+# that serves a hook call without being the pid the lock records.
+start_live_harness_process() {
+  local pid
+  "$FAKE_CLAUDE" -c 'sleep 60; :' >/dev/null 2>&1 &
+  pid=$!
+  printf '%s\n' "$pid"
+}
+
+test_post_afk_ledger_never_freezes_the_next_claim() {
+  local dir owner out status dead
+  dir=$(make_primary_dir "$TMP_ROOT/post-afk-ledger")
+  : > "$dir/state/task.meta"
+  write_arm_fixture "$dir" actionable
+  # The away-mode episode's last cycle: it recorded the terminal afk outcome and
+  # exited, so the ledger names a generation whose owner is gone.
+  sleep 0 &
+  dead=$!
+  wait "$dead" 2>/dev/null || true
+  record_autoarm_epoch "$dir" 918 "$dead" afk
+  # The captain has returned: bin/fm-afk-return.sh cleared the away-mode flag.
+  [ ! -e "$dir/state/.afk" ] || fail "the fixture must represent a home that is no longer away"
+  owner=$(start_detached_lock_owner "$dir")
+
+  out=$(run_autoarm_detached_chain "$dir" "$owner" sess-return sess-return 2>&1); status=$?
+  stop_detached_lock_owner "$owner"
+
+  expect_code 2 "$status" "the first Stop after the return must claim the home, not defer to the away episode's spent entry"
+  [ -e "$dir/state/arm-ran" ] || fail "the home was left unarmed with work in flight after the return"
+  assert_contains "$out" "firstmate watcher wake" "the reclaiming cycle must translate its wake"
+  [ "$(epoch_field "$dir" epoch)" -gt 918 ] || fail "the frozen away-mode generation was never superseded: $(epoch_field "$dir" epoch)"
+  [ "$(epoch_outcome "$dir")" = rewake ] || fail "the new cycle did not record its own outcome: $(epoch_outcome "$dir")"
+  pass "auto-arm: a terminal away-mode ledger entry never freezes the first claim after the return"
+}
+
+test_hook_claims_home_whose_lock_records_another_process_of_its_session() {
+  local dir owner worker out status
+  dir=$(make_primary_dir "$TMP_ROOT/post-afk-binding")
+  : > "$dir/state/task.meta"
+  write_arm_fixture "$dir" actionable
+  owner=$(start_detached_lock_owner "$dir")
+  worker=$(start_live_harness_process)
+
+  # No binding yet: with the lock recording one process and the harness
+  # exporting another, neither existing proof can answer, and the hook is inert.
+  # That is the reproduced failure, and it is asserted so the case below cannot
+  # pass vacuously.
+  status=0
+  out=$(FM_CLAUDE_AUTOARM_TRACE=1 run_autoarm_detached_chain "$dir" "$worker" sess-cap sess-cap 2>&1) || status=$?
+  expect_code 0 "$status" "the fixture is vacuous: the hook already claimed the home without any binding"
+  assert_contains "$out" "neither identity proof applies" "the unbound home must report the measured inert reason"
+  [ ! -e "$dir/state/arm-ran" ] || fail "the fixture is vacuous: the hook armed before the binding existed"
+
+  # The binding the acquiring session recorded beside its own lock is what
+  # answers: the lock's owner and this delivering session are one session.
+  bind_session_identity "$dir" "$owner" sess-cap
+  out=$(run_autoarm_detached_chain "$dir" "$worker" sess-cap sess-cap 2>&1); status=$?
+  expect_code 2 "$status" "the session the lock is bound to must claim its own home"
+  [ -e "$dir/state/arm-ran" ] || fail "the bound session did not arm its own home"
+  assert_contains "$out" "firstmate watcher wake" "the claiming cycle must translate its wake"
+  [ "$(cat "$dir/state/.lock")" = "$owner" ] || fail "claiming through the binding replaced the recorded owner"
+
+  # A different session on the same machine still cannot use that binding.
+  rm -f "$dir/state/arm-ran" "$dir/state/.claude-autoarm-epoch"
+  status=0
+  run_autoarm_detached_chain "$dir" "$worker" sess-other sess-other >/dev/null 2>&1 || status=$?
+  stop_detached_lock_owner "$owner"
+  stop_detached_lock_owner "$worker"
+  expect_code 0 "$status" "a foreign session claimed a home bound to another session"
+  [ ! -e "$dir/state/arm-ran" ] || fail "a foreign session armed a home bound to another session"
+  pass "auto-arm: a Stop hook claims the home its session is bound to even when the lock records another process of it"
+}
+
 test_inert_when_fleet_idle() {
   local dir out status
   dir=$(make_primary_dir "$TMP_ROOT/idle")
@@ -1317,6 +1406,8 @@ test_detached_chain_refuses_a_foreign_session
 test_detached_chain_refuses_incoherent_or_missing_identity
 test_detached_chain_refuses_missing_or_malformed_lock
 test_detached_chain_keeps_homes_independent
+test_post_afk_ledger_never_freezes_the_next_claim
+test_hook_claims_home_whose_lock_records_another_process_of_its_session
 test_inert_when_fleet_idle
 test_actionable_close_rewakes_with_reason
 test_actionable_close_with_live_successor_rewakes_once

@@ -10,13 +10,16 @@
 #   - Scope: only a genuine primary checkout (plain checkout or validly marked
 #     secondmate home) with AGENTS.md, bin/, and the effective state dir - the
 #     exact fm-turnend-guard.sh scope. Child crew/scout worktrees stay inert.
-#   - Identity: only when THIS session holds state/.lock, proven either by
-#     harness ancestry or by the delivering Claude session's own identity. The
-#     second proof is required because Claude Code serves hook commands from a
-#     shared worker pool whose top process is reparented to init, which can leave
-#     a hook with no ancestry path back to its live session at all; both proofs
-#     and the disjunction over them are owned by bin/fm-session-lock-lib.sh, so
-#     the admission check and the post-recovery re-check cannot drift apart.
+#   - Identity: only when THIS session holds state/.lock, proven by harness
+#     ancestry, by the delivering Claude session's own pid, or by the session the
+#     lock's durable binding records. The extra proofs are required because
+#     Claude Code serves hook commands from a shared worker pool whose top
+#     process is reparented to init, which can leave a hook with no ancestry path
+#     back to its live session at all, and because the lock records the
+#     OUTERMOST pid of the run that acquired it, which is not always the pid the
+#     harness exports for the same session; all three proofs and the disjunction
+#     over them are owned by bin/fm-session-lock-lib.sh, so the admission check
+#     and the post-recovery re-check cannot drift apart.
 #     When an existing numeric owner fails the shared harness-liveness
 #     predicate, the hook delegates guarded recovery to bin/fm-lock.sh and then
 #     re-verifies ownership through that same disjunction. A live owner, a
@@ -148,6 +151,9 @@ if fm_session_lock_owned_by_this_claude_session "$STATE" "$PAYLOAD"; then
     ancestry) trace 'identity: proven by harness ancestry' ;;
     claude-session)
       trace "identity: proven by the delivering Claude session (pid ${CLAUDE_PID:-?})"
+      ;;
+    claude-session-binding)
+      trace "identity: proven by the lock's recorded session (${CLAUDE_CODE_SESSION_ID:-?})"
       ;;
   esac
 else

@@ -324,6 +324,39 @@ fm_session_lock_publish_identity() {  # <state-dir> <lock-pid>
   }
 }
 
+# True when the durable binding beside state dir $1's session lock records that
+# lock for session $2. This is the shared core of every recorded-identity proof
+# below, so the record's own rules are stated once here:
+#   1. the lock holds a plain numeric pid;
+#   2. the binding beside it is a regular file naming exactly that pid, so a
+#      record left by a previous owner can never speak for the current lock;
+#   3. the session it names is exactly the session asked about;
+#   4. the lock pid is still a live harness process.
+#
+# A foreign session fails at 3 because it carries its own id. An absent or
+# malformed lock fails at 1, an absent or stale binding at 2, and a dead owner at
+# 4. Two firstmate homes on one machine stay independent because each reads its
+# own state dir. An old lock carrying only a pid has no binding, so it fails at 2
+# and that home keeps exactly the ancestry-only behavior it had before.
+#
+# Each caller supplies the CORROBORATION that the session it asks about is really
+# the one behind this run, because the environment string alone proves nothing.
+fm_session_lock_binding_names_session() {  # <state-dir> <session-id>
+  local state=$1 want=$2 lock_pid path recorded_pid recorded_session
+  [ -n "$want" ] || return 1
+  lock_pid=$(cat "$state/.lock" 2>/dev/null || true)
+  case "$lock_pid" in
+    ''|*[!0-9]*) return 1 ;;
+  esac
+  path=$(fm_session_lock_identity_path "$state")
+  [ -f "$path" ] && [ ! -L "$path" ] || return 1
+  recorded_pid=$(sed -n 's/^pid=//p' "$path" 2>/dev/null | sed -n '1p')
+  recorded_session=$(sed -n 's/^session=//p' "$path" 2>/dev/null | sed -n '1p')
+  [ "$recorded_pid" = "$lock_pid" ] || return 1
+  [ -n "$recorded_session" ] && [ "$recorded_session" = "$want" ] || return 1
+  fm_harness_pid_alive "$lock_pid" || return 1
+}
+
 # True when state dir $1's session lock was acquired by the very session this
 # process belongs to, proven by recorded identity instead of process ancestry.
 #
@@ -335,37 +368,55 @@ fm_session_lock_publish_identity() {  # <state-dir> <lock-pid>
 # once the pool that could reach it is gone it can never again prove it owns its
 # own lock.
 #
-# The proof is a conjunction, and every part is required:
-#   1. this process carries a harness session identity at all;
-#   2. that identity is CORROBORATED by this process's own ancestry, not merely
-#      inherited as an environment string - see fm_harness_session_is_ours;
-#   3. the lock holds a plain numeric pid;
-#   4. the binding beside it is a regular file naming exactly that pid, so a
-#      record left by a previous owner can never speak for the current lock;
-#   5. the session it names is exactly this process's session;
-#   6. the lock pid is still a live harness process.
-#
-# A foreign session fails at 5 because it carries its own id, and a process that
-# merely inherited another session's environment fails at 2. An absent or
-# malformed lock fails at 3, an absent or stale binding at 4, and a dead owner at
-# 6. Two firstmate homes on one machine stay independent because each reads its
-# own state dir. An old lock carrying only a pid has no binding, so it fails at 4
-# and that home keeps exactly today's ancestry-only behavior.
+# The corroboration here is ancestry: this process carries a harness session
+# identity AND that identity is confirmed by its own ancestry rather than merely
+# inherited as an environment string (fm_harness_session_is_ours). A caller with
+# no hook event has nothing stronger available, so a process that merely
+# inherited another session's environment is refused.
 fm_session_lock_owned_by_session_identity() {  # <state-dir>
-  local state=$1 id lock_pid path recorded_pid recorded_session
+  local state=$1 id
   id=$(fm_harness_session_identity) || return 1
   fm_harness_session_is_ours || return 1
-  lock_pid=$(cat "$state/.lock" 2>/dev/null || true)
-  case "$lock_pid" in
-    ''|*[!0-9]*) return 1 ;;
-  esac
-  path=$(fm_session_lock_identity_path "$state")
-  [ -f "$path" ] && [ ! -L "$path" ] || return 1
-  recorded_pid=$(sed -n 's/^pid=//p' "$path" 2>/dev/null | sed -n '1p')
-  recorded_session=$(sed -n 's/^session=//p' "$path" 2>/dev/null | sed -n '1p')
-  [ "$recorded_pid" = "$lock_pid" ] || return 1
-  [ -n "$recorded_session" ] && [ "$recorded_session" = "$id" ] || return 1
-  fm_harness_pid_alive "$lock_pid" || return 1
+  fm_session_lock_binding_names_session "$state" "$id"
+}
+
+# True when state dir $1 holds a session lock the durable binding records for the
+# very session that delivered hook payload $2.
+#
+# This is the third membership proof, and it exists because the second one is
+# strictly pid-shaped: it requires the pid the harness exports to BE the pid the
+# lock records. Claude Code serves hook and tool commands from a shared per-user
+# worker pool, and bin/fm-lock.sh writes the OUTERMOST pid of the contiguous
+# harness run that acquired the lock, so the two are not always the same process
+# even though they are the same session. When they differ, ancestry cannot reach
+# the recorded owner either, and the hook goes permanently inert on a home whose
+# lock is alive and genuinely its own - the measured shape reported as "live
+# session N owns this home and neither identity proof applies".
+#
+# The proof is a conjunction, and every part is required:
+#   1. the delivered payload names a session id, which no inherited environment
+#      can supply - it describes THIS event;
+#   2. the session id the delivering session exported matches that payload, so
+#      the environment read here belongs to the session that emitted the event
+#      rather than to some ancestor session it was inherited from. This is the
+#      SAME corroboration the pid proof uses, and it replaces the ancestry
+#      corroboration fm_session_lock_owned_by_session_identity needs, because a
+#      caller with no hook event has no way to prove its environment describes
+#      the call it is making;
+#   3. the durable binding beside the lock names exactly the pid the lock
+#      records, so a record left by a previous owner can never speak for it;
+#   4. the session that binding names is exactly this session;
+#   5. the recorded owner is still a live harness process.
+#
+# A foreign session fails at 4 because it carries its own id, so several
+# firstmate homes on one machine stay independent exactly as before. A home whose
+# lock carries no binding fails at 3 and keeps the previous two-proof behavior.
+fm_session_lock_owned_by_claude_hook_binding() {  # <state-dir> <payload>
+  local state=$1 payload=${2-} payload_session
+  [ -n "${CLAUDE_CODE_SESSION_ID:-}" ] || return 1
+  payload_session=$(fm_claude_payload_session_id "$payload") || return 1
+  [ "$payload_session" = "$CLAUDE_CODE_SESSION_ID" ] || return 1
+  fm_session_lock_binding_names_session "$state" "$CLAUDE_CODE_SESSION_ID"
 }
 
 # True when the session behind the current run owns state dir $1's fleet lock,
@@ -389,18 +440,19 @@ fm_session_lock_owned_by_current_session() {  # <state-dir>
 # session lock, proven either by harness ancestry or by the identity delivered
 # with hook payload $2. This disjunction is the ONE owner of "may this HOOK
 # EVENT act for this home", so the gate that admits a hook run and any later
-# re-verification cannot drift apart. It deliberately does not consult the
-# durable binding: a payload proves the delivering session directly, and the
-# binding is the answer for callers that have no payload at all.
+# re-verification cannot drift apart.
 #
-# Both members are load-bearing. Ancestry is tried first and left unchanged,
+# All three members are load-bearing. Ancestry is tried first and left unchanged,
 # because a legitimate claude-launched-by-claude wrapper chain records the
 # OUTERMOST pid in the lock while CLAUDE_PID names the inner session, so
-# preferring the delivered identity would refuse that case. The delivered
+# preferring the delivered identity would refuse that case. The delivered pid
 # identity is required because a hook served by the shared per-user worker pool
-# reparented to init has no ancestry path back to its live session at all.
-# Neither member is a fallback for the other: a caller that needs only one of
-# them still calls that one directly.
+# reparented to init has no ancestry path back to its live session at all. The
+# durable binding is required because that same OUTERMOST-pid rule means the pid
+# the harness exports and the pid the lock records can be different processes of
+# one session, which leaves the first two proofs with nothing to match on. None
+# of them is a fallback for the others: a caller that needs only one still calls
+# that one directly.
 #
 # FM_SESSION_LOCK_PROOF names the member that carried the verdict, so a caller
 # can report which proof applied; it is empty when neither holds.
@@ -416,6 +468,10 @@ fm_session_lock_owned_by_this_claude_session() {  # <state-dir> <payload>
   fi
   if fm_session_lock_owned_by_claude_hook "$state" "$payload"; then
     FM_SESSION_LOCK_PROOF=claude-session
+    return 0
+  fi
+  if fm_session_lock_owned_by_claude_hook_binding "$state" "$payload"; then
+    FM_SESSION_LOCK_PROOF=claude-session-binding
     return 0
   fi
   return 1

@@ -77,6 +77,11 @@ lib_eval() {  # <fakebin> <expression> [session-id] [claude-pid]
   " "$LIB"
 }
 
+# A Stop payload naming session $1, in the shape Claude Code actually delivers.
+stop_payload() {  # <session-id>
+  printf '{"session_id":"%s","hook_event_name":"Stop","stop_hook_active":false}' "$1"
+}
+
 new_home() {  # <name>
   local dir="$TMP_ROOT/$1"
   mkdir -p "$dir/state"
@@ -387,10 +392,116 @@ test_e2e_acquire_records_the_binding_and_readmits_the_pool() {
   pass "session-lock identity e2e: acquire binds the session, readmits it from a reparented pool, and still refuses a foreign or inherited one"
 }
 
+# --- hook membership when the exported pid is not the recorded owner ----------
+# The second, pid-shaped proof asks whether the pid the harness exports for this
+# event IS the pid the lock records. bin/fm-lock.sh deliberately records the
+# OUTERMOST pid of the contiguous harness run that acquired the lock, so for one
+# and the same session those can be two different processes, and then ancestry
+# cannot reach the recorded owner either. The measured consequence was a Stop
+# hook permanently inert on a home whose lock is alive and genuinely its own,
+# reporting "live session N owns this home and neither identity proof applies".
+# These cases pin the third proof and its refusals, and assert the divergence so
+# they cannot pass vacuously.
+
+test_hook_is_readmitted_when_the_exported_pid_is_not_the_recorded_owner() {
+  local dir fakebin payload
+  dir=$(new_home hook-binding-owner)
+  fakebin=$(fm_fakebin "$dir/bin")
+  write_reparented_pool_ps "$fakebin"
+  printf '89187\n' > "$dir/state/.lock"
+  bind_identity "$dir/state" 89187 "$SESSION"
+  payload=$(stop_payload "$SESSION")
+
+  # The divergence: with the pool process serving this event, neither existing
+  # proof can answer, which is exactly the inert-hook shape.
+  if lib_eval "$fakebin" "fm_session_lock_owned_by_self '$dir/state'" "$SESSION"; then
+    fail "the fixture is vacuous: ancestry reached the recorded owner from the pool"
+  fi
+  if lib_eval "$fakebin" "fm_session_lock_owned_by_claude_hook '$dir/state' '$payload'" "$SESSION"; then
+    fail "the fixture is vacuous: the exported pid already matched the recorded owner"
+  fi
+
+  lib_eval "$fakebin" \
+    "fm_session_lock_owned_by_claude_hook_binding '$dir/state' '$payload'" "$SESSION" \
+    || fail "the delivering session was not recognized through the lock's own binding"
+  lib_eval "$fakebin" \
+    "fm_session_lock_owned_by_this_claude_session '$dir/state' '$payload'" "$SESSION" \
+    || fail "the hook disjunction refused the very session the lock is bound to"
+  [ "$(lib_eval "$fakebin" \
+    "fm_session_lock_owned_by_this_claude_session '$dir/state' '$payload' && printf '%s' \"\$FM_SESSION_LOCK_PROOF\"" \
+    "$SESSION")" = claude-session-binding ] \
+    || fail "the disjunction did not report which proof carried the verdict"
+  pass "session-lock identity: a Stop hook proves membership through the lock's recorded session when the exported pid is another process of it"
+}
+
+test_hook_binding_proof_refuses_every_unproven_shape() {
+  local dir fakebin
+  dir=$(new_home hook-binding-refusals)
+  fakebin=$(fm_fakebin "$dir/bin")
+  write_reparented_pool_ps "$fakebin"
+  printf '89187\n' > "$dir/state/.lock"
+  bind_identity "$dir/state" 89187 "$SESSION"
+
+  # A foreign session carries its own id in both the payload and the
+  # environment, so the binding names someone else and it stays out.
+  if lib_eval "$fakebin" \
+    "fm_session_lock_owned_by_this_claude_session '$dir/state' '$(stop_payload "$OTHER_SESSION")'" \
+    "$OTHER_SESSION"; then
+    fail "a foreign session claimed a home bound to another session"
+  fi
+
+  # An environment inherited from the owning session, replayed against some
+  # other event, proves nothing: the payload is what describes THIS event.
+  if lib_eval "$fakebin" \
+    "fm_session_lock_owned_by_this_claude_session '$dir/state' '$(stop_payload "$OTHER_SESSION")'" \
+    "$SESSION"; then
+    fail "an inherited environment claimed the home against an unrelated event"
+  fi
+
+  # No payload session at all, and no environment identity at all.
+  if lib_eval "$fakebin" \
+    "fm_session_lock_owned_by_this_claude_session '$dir/state' '{}'" "$SESSION"; then
+    fail "a payload naming no session claimed the home"
+  fi
+  if lib_eval "$fakebin" \
+    "fm_session_lock_owned_by_this_claude_session '$dir/state' '$(stop_payload "$SESSION")'" ''; then
+    fail "a hook with no exported session identity claimed the home"
+  fi
+
+  # A binding naming a pid the lock does not record cannot speak for that lock.
+  bind_identity "$dir/state" 4242 "$SESSION"
+  if lib_eval "$fakebin" \
+    "fm_session_lock_owned_by_this_claude_session '$dir/state' '$(stop_payload "$SESSION")'" \
+    "$SESSION"; then
+    fail "a binding recorded for another pid spoke for the current lock"
+  fi
+
+  # A home whose lock carries no binding keeps exactly the previous behavior.
+  rm -f "$dir/state/.lock.session"
+  if lib_eval "$fakebin" \
+    "fm_session_lock_owned_by_this_claude_session '$dir/state' '$(stop_payload "$SESSION")'" \
+    "$SESSION"; then
+    fail "an unbound lock was claimed through a binding that does not exist"
+  fi
+
+  # A dead recorded owner is not readmitted by its binding either; that path
+  # belongs to the hook's own guarded stale-lock recovery.
+  printf '5150\n' > "$dir/state/.lock"
+  bind_identity "$dir/state" 5150 "$SESSION"
+  if lib_eval "$fakebin" \
+    "fm_session_lock_owned_by_this_claude_session '$dir/state' '$(stop_payload "$SESSION")'" \
+    "$SESSION"; then
+    fail "a lock naming a non-harness process was claimed through its binding"
+  fi
+  pass "session-lock identity: the binding proof refuses foreign, inherited, unconfirmed, mismatched, unbound, and dead-owner shapes"
+}
+
 test_owning_session_is_recognized_from_a_reparented_pool
 test_foreign_session_still_fails_closed
 test_inherited_session_environment_never_proves_ownership
 test_absent_malformed_and_unbound_locks_fail_closed
 test_two_homes_on_one_machine_stay_independent
 test_binding_is_replaced_not_inherited
+test_hook_is_readmitted_when_the_exported_pid_is_not_the_recorded_owner
+test_hook_binding_proof_refuses_every_unproven_shape
 test_e2e_acquire_records_the_binding_and_readmits_the_pool

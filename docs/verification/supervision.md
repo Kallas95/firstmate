@@ -558,7 +558,32 @@ The lab registers two `asyncRewake` Stop hooks, the tracked auto-arm plus a prob
 The synchronous probe and the detached one each logged three records, matching the session's three Stops, so Claude Code runs EVERY registered `asyncRewake` Stop hook at a turn end rather than only the first, and the detached alarm has a delivery path that genuinely reaches it.
 On both paths the session exported `CLAUDE_PID=20323`, exactly the pid `state/.lock` recorded, and `CLAUDE_CODE_SESSION_ID` equalled the delivered payload's `session_id`, both `1ea063c6-94c4-459e-ad19-8603c2bbfb6c`.
 The auto-arm hook ran on those same Stops: `state/arm-ran` held two hook-owned cycles, `state/.claude-autoarm-epoch` recorded `epoch=4 owner_pid=25124 outcome=rewake`, no owner lock was left behind, and no turn was blocked for ending blind.
-The tokenless-cycle count in that guard is sensitive to how many drains the fixture observes and is not a property of the identity proof; it reproduces identically on the unpatched hook.
+The tokenless-cycle count in that guard is not a property of the identity proof, and it reproduces identically on the unpatched hook.
+It was keyed on a drain count until 2026-08-27, when the tracked `SessionStart` hook's own digest made drains stop being a stable count of Stop-owned cycles; it now ends the fixture's in-flight need on the cycle count the case actually measures.
+
+### Away-mode return, 2026-08-27
+
+Claude Code 2.1.247 on macOS 25.6.0 arm64 with tmux 3.7b, in throwaway project and home directories with an isolated lab tmux session for the away daemon's captain pane.
+No live fleet home, worktree, or tmux session was touched.
+
+The lab enters away mode with the real `bin/fm-afk-launch.sh`, ends a turn while the away daemon owns supervision, leaves through the real `bin/fm-afk-return.sh`, and then measures the next Stop.
+Its per-Stop probe records the away-mode flag and the epoch ledger, so the ORDER of the episode is evidence rather than assumption.
+
+```sh
+FM_CLAUDE_LIVE_E2E=1 tests/fm-claude-stop-autoarm-live-e2e.test.sh
+```
+
+```text
+ok - Claude 2.1.247 (Claude Code) live E2E reclaimed a stale session lock through session start, completed two tokenless Stop-owned rewake cycles, preserved the competing-live-owner boundary, and still delivers the session identity the ownership proof depends on
+ok - Claude 2.1.247 (Claude Code) live E2E entered away mode, crossed a turn boundary while the away daemon owned supervision, returned through the real return gate, and had the Stop-owned auto-arm claim the home again at the next Stop with no model-issued arm
+```
+
+What that pass establishes, and what it does not:
+
+- The away-mode episode really crossed a turn boundary: the probe logged a Stop with the flag still set, and the auto-arm recorded nothing while it was set, which is its contract.
+- The first Stop after the return claimed the home on its own, wrote a fresh generation, armed a cycle, and the model issued no arm command of its own.
+- It does NOT discriminate the third membership proof, because a lab session's lock and exported session pid are the same process; the shape where they differ is pinned portably in `tests/fm-session-lock-identity.test.sh` and `tests/fm-claude-stop-autoarm.test.sh`, each asserting the inert divergence first so the case cannot pass vacuously.
+- It does NOT exercise the consecutive-block bound, which needs many blocked turns; that is pinned portably in `tests/fm-turnend-guard.test.sh`.
 
 
 Deterministic entry points:

@@ -1448,6 +1448,113 @@ test_hook_claude_mode_terminal_fail_open_clears_abandoned_claim() {
   pass "fm-turnend-guard --claude: the terminal path clears an abandoned claim instead of stepping aside silently"
 }
 
+# --- bounding consecutive blocks when the automatic path never runs -----------
+# The measured 2026-08-27 lapse: the Stop-owned auto-arm never claimed the home
+# after an away-mode episode, so the epoch ledger never changed. COUNT is keyed
+# on that epoch identity, so it froze at 1, and the one attended fail-open also
+# requires a VERIFIED failure episode - evidence only an auto-arm that RUNS can
+# produce. The result was 172 consecutive blocked stops over five hours with no
+# bound and no alarm. A run of blocked stops is itself evidence that supervision
+# is down, so it opens the same one alarm on its own.
+seed_frozen_ledger() {  # <dir>
+  printf 'epoch=918 owner_pid=999 outcome=afk updated_at=1\n' > "$1/state/.claude-autoarm-epoch"
+  touch -t 202001010000 "$1/state/.claude-autoarm-epoch"
+}
+
+budget_field() {  # <dir> <field>
+  sed -n "s/^$2=//p" "$1/state/.turnend-claude-blocks" 2>/dev/null || true
+}
+
+test_hook_claude_mode_bounds_blocks_when_the_auto_arm_never_claims() {
+  local dir out status i
+  dir=$(make_primary_dir "$TMP_ROOT/hook-claude-stall-bound")
+  : > "$dir/state/task1.meta"
+  seed_frozen_ledger "$dir"
+
+  for i in 1 2 3; do
+    out=$(FM_CLAUDE_TURNEND_STALL_BUDGET=3 FM_CLAUDE_AUTOARM_SYNC_WAIT_MS=100 \
+      run_hook_claude "$dir" true); status=$?
+    expect_code 2 "$status" "block $i must still refuse a blind turn end"
+    assert_contains "$out" "TURN WOULD END BLIND" "block $i lost the blind-turn banner"
+  done
+  # The divergence this bound exists for: the epoch-keyed count is still frozen
+  # at its first value, so on its own it could never reach any budget.
+  [ "$(budget_field "$dir" count)" = 1 ] \
+    || fail "the fixture is vacuous: the epoch-keyed count advanced on a frozen ledger ($(budget_field "$dir" count))"
+  [ "$(budget_field "$dir" stalled)" = 3 ] \
+    || fail "consecutive blocked stops were not counted: $(budget_field "$dir" stalled)"
+
+  out=$(FM_CLAUDE_TURNEND_STALL_BUDGET=3 FM_CLAUDE_AUTOARM_SYNC_WAIT_MS=100 \
+    run_hook_claude "$dir" true); status=$?
+  expect_code 0 "$status" "the bound must open the one attended fail-open once the run of blocks passes it"
+  assert_contains "$out" 'FIRSTMATE SUPERVISION IS GENUINELY DOWN' "the bounded fail-open produced no captain-visible alarm"
+  assert_contains "$out" 'without the Stop-owned auto-arm ever claiming this home' \
+    "the alarm did not name the automatic path that never ran"
+  # It must NOT borrow the failure-alarm marker: that marker also tells the
+  # auto-arm to stop creating exit-2 continuations, which would swallow the first
+  # real wake of an auto-arm that comes back.
+  assert_absent "$dir/state/.claude-autoarm-failure-alarmed" \
+    "the stalled fail-open consumed the auto-arm's failure-episode marker"
+
+  # And it stays a bound, not a release: the next unhealthy stop blocks again,
+  # and the alarm does not repeat for the same run of blocks.
+  for i in 1 2 3; do
+    out=$(FM_CLAUDE_TURNEND_STALL_BUDGET=3 FM_CLAUDE_AUTOARM_SYNC_WAIT_MS=100 \
+      run_hook_claude "$dir" true); status=$?
+    expect_code 2 "$status" "the turn boundary must keep refusing blind stops after its one alarm"
+    assert_contains "$out" "TURN WOULD END BLIND" "the post-alarm block lost the blind-turn banner"
+    assert_not_contains "$out" 'GENUINELY DOWN' "the stalled alarm repeated inside one run of blocks"
+  done
+  pass "fm-turnend-guard --claude: consecutive blocks are bounded and alarm once even when the auto-arm never claims the home (incident regression)"
+}
+
+test_hook_claude_mode_stall_bound_resets_on_a_turn_it_lets_through() {
+  local dir out status i
+  dir=$(make_primary_dir "$TMP_ROOT/hook-claude-stall-reset")
+  : > "$dir/state/task1.meta"
+  seed_frozen_ledger "$dir"
+
+  for i in 1 2 3; do
+    FM_CLAUDE_TURNEND_STALL_BUDGET=3 FM_CLAUDE_AUTOARM_SYNC_WAIT_MS=100 \
+      run_hook_claude "$dir" true >/dev/null 2>&1 || true
+  done
+  [ "$(budget_field "$dir" stalled)" = 3 ] || fail "the fixture did not accumulate a run of blocks"
+
+  # The auto-arm claims this event's recovery: that is real progress, so the run
+  # of consecutive blocks ends here rather than carrying into the next fault.
+  printf 'epoch=919 owner_pid=999 outcome=rewake updated_at=%s\n' "$(date +%s)" \
+    > "$dir/state/.claude-autoarm-epoch"
+  out=$(FM_CLAUDE_TURNEND_STALL_BUDGET=3 run_hook_claude "$dir" true); status=$?
+  expect_code 0 "$status" "a rewake the auto-arm owns must still allow the stop"
+  [ "$(budget_field "$dir" stalled)" = 0 ] \
+    || fail "an allowed turn did not end the run of consecutive blocks: $(budget_field "$dir" stalled)"
+
+  seed_frozen_ledger "$dir"
+  out=$(FM_CLAUDE_TURNEND_STALL_BUDGET=3 FM_CLAUDE_AUTOARM_SYNC_WAIT_MS=100 \
+    run_hook_claude "$dir" true); status=$?
+  expect_code 2 "$status" "the next fault must start a fresh run of blocks, not inherit the old one"
+  assert_not_contains "$out" 'GENUINELY DOWN' "a reset run alarmed on its first block instead of counting again"
+  [ "$(budget_field "$dir" stalled)" = 1 ] \
+    || fail "the fresh run did not start counting from one: $(budget_field "$dir" stalled)"
+  pass "fm-turnend-guard --claude: a turn the guard lets through ends the run of consecutive blocks"
+}
+
+test_hook_claude_mode_stall_bound_stays_shut_in_away_mode() {
+  local dir out status i
+  dir=$(make_primary_dir "$TMP_ROOT/hook-claude-stall-afk")
+  : > "$dir/state/task1.meta"
+  : > "$dir/state/.afk"
+  seed_frozen_ledger "$dir"
+
+  for i in 1 2 3 4 5; do
+    out=$(FM_CLAUDE_TURNEND_STALL_BUDGET=3 FM_CLAUDE_AUTOARM_SYNC_WAIT_MS=100 \
+      run_hook_claude "$dir" true); status=$?
+    expect_code 2 "$status" "away mode must keep refusing blind stops rather than opening the attended alarm"
+  done
+  assert_absent "$dir/state/.claude-autoarm-failure-alarmed" "away mode spent the attended alarm with nobody attending"
+  pass "fm-turnend-guard --claude: the consecutive-block bound never opens while the away daemon owns supervision"
+}
+
 test_hook_claude_mode_preserves_fresh_failed_progression() {
   local dir out status count
   dir=$(make_primary_dir "$TMP_ROOT/hook-claude-failed-epoch")
@@ -1808,6 +1915,9 @@ test_hook_claude_mode_blocks_on_stuck_arming_claim
 test_hook_claude_mode_allows_on_open_generation_claim
 test_hook_claude_mode_blocks_on_stuck_generation_claim
 test_hook_claude_mode_terminal_fail_open_clears_abandoned_claim
+test_hook_claude_mode_bounds_blocks_when_the_auto_arm_never_claims
+test_hook_claude_mode_stall_bound_resets_on_a_turn_it_lets_through
+test_hook_claude_mode_stall_bound_stays_shut_in_away_mode
 test_hook_claude_mode_preserves_fresh_failed_progression
 test_hook_claude_mode_integrated_monotonic_fail_open
 test_hook_claude_mode_recovery_contention_is_not_ordinary_allow
