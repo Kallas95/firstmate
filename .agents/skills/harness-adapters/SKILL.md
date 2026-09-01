@@ -298,6 +298,13 @@ The decision persists per path in `~/.pi/agent/trust.json`, so later spawns in t
 The extension must listen for pi's `turn_end` event, not `agent_end`, so the watcher wakes after each completed turn instead of only when the whole agent run exits.
 Pi sets `PI_CODING_AGENT=true` for its children; this is its harness-detection env marker.
 
+**Scout web search.**
+Pi has no built-in web tool and no MCP, so a Pi worker has no web access by default.
+A Pi SCOUT is the exception: `bin/fm-spawn.sh` gives it a `web_search` tool when this home has an Ollama key configured, so falling back to Pi for an investigation no longer costs the scout its ability to establish an external fact.
+Nothing else gets it - a Pi implementation worker keeps no web access, and Claude workers already have their own.
+Treat it as a dispatch fact, not something to arrange: there is no flag, and a home without the key simply launches the scout without the tool.
+`docs/configuration.md` owns the operator-facing setup and cost.
+
 **Primary-session guard fact (verified 2026-07-09, Pi 0.80.5).**
 The firstmate PRIMARY's own `.pi/extensions/fm-primary-turnend-guard.ts` listens for logical-run `agent_settled`, not per-tool-loop `turn_end`, and uses `pi.sendUserMessage(..., { deliverAs: "followUp" })` to force one guarded follow-up when `bin/fm-turnend-guard.sh` returns 2.
 Without `deliverAs: "followUp"`, Pi rejects the send while the agent is still processing.
