@@ -42,9 +42,9 @@ Pi sets `PI_CODING_AGENT=true` for its children as its harness-detection marker.
 ## Scout web search
 
 Pi has no built-in web tool and no MCP, so a Pi worker has no web access by default.
-A Pi SCOUT is the exception: `../../../bin/fm-spawn.sh` gives it a `web_search` tool when this home has an Ollama key configured, so falling back to Pi for an investigation no longer costs the scout its ability to establish an external fact.
+A Pi SCOUT is the exception: `../../../bin/fm-spawn.sh` gives it a `web_search` tool when this home has opted in via `config/pi-scout-websearch` and has an Ollama key configured, so falling back to Pi for an investigation no longer costs the scout its ability to establish an external fact.
 Nothing else gets it - a Pi implementation worker keeps no web access, and Claude workers already have their own.
-Treat it as a dispatch fact, not something to arrange: there is no flag, and a home without the key simply launches the scout without the tool.
+Treat it as a dispatch fact, not something to arrange: a home missing the opt-in flag or the key simply launches the scout without the tool.
 `../../../docs/configuration.md` owns the operator-facing setup and cost.
 
 ## Primary integration

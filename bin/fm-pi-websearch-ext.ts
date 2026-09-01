@@ -8,8 +8,9 @@
 // it, and has nothing to leak. See that script's header for the guarantee and
 // for why it is not a privilege boundary.
 //
-// bin/fm-spawn.sh loads this with `-e` for Pi SCOUTS only, and only when a key
-// is actually configured. Routine workers stay without it deliberately: a
+// bin/fm-spawn.sh loads this with `-e` for Pi SCOUTS only, and only on a home
+// whose captain opted in (config/pi-scout-websearch) and where a key is
+// actually configured. Routine workers stay without it deliberately: a
 // worker editing a known repository gets its answers from the code, and every
 // search spends the same shared Ollama quota the usage probe reports.
 import { dirname, join } from "node:path";

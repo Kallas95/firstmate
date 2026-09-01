@@ -37,10 +37,12 @@
 # The file is the same one the Ollama usage probe already reads. It is PARSED,
 # never sourced: sourcing an env file executes it, which would turn a corrupted
 # or hostile key file into code execution for no benefit.
-# Its presence is also the feature's only switch. No key file means no tool:
-# bin/fm-spawn.sh asks `status` before wiring the extension into a scout, so a
-# home without the key simply never sees a web_search tool. There is no separate
-# enable flag to keep in sync.
+# A key alone does not turn the feature on. The file predates this feature
+# (the usage probe reads it), so bin/fm-spawn.sh treats its presence as a
+# credential, not as consent to spend: it wires the extension into a scout only
+# when the home's captain opted in via the local config/pi-scout-websearch flag
+# AND `status` here confirms a usable key. A home missing either simply never
+# sees a web_search tool.
 #
 # Output. `search` prints one JSON object, {"results":[{title,url,content,
 # truncated}]}, and nothing else. Content is truncated per result because the

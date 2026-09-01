@@ -3,8 +3,11 @@
 #
 # Exposure is the whole cost control for this feature: every search spends
 # metered quota, and only a scout has questions the repository cannot answer.
-# These cases drive the real bin/fm-spawn.sh against fake panes and a real
-# worktree, and read the launch command it composes, so the scout-only rule is
+# Wiring the tool takes the captain's opt-in flag (config/pi-scout-websearch)
+# on top of a usable key, because the key file predates this feature and its
+# presence is a credential, not consent to spend. These cases drive the real
+# bin/fm-spawn.sh against fake panes and a real worktree, and read the launch
+# command it composes, so the scout-only rule and the consent rule are both
 # enforced by a test rather than by a comment.
 set -u
 
@@ -112,9 +115,14 @@ KEY_FILE="$TMP_ROOT/ollama-cloud.env"
 write_key_file "$KEY_FILE"
 ABSENT_KEY="$TMP_ROOT/absent-ollama-cloud.env"
 
-# --- a Pi scout on a home with a key gets the tool ---------------------------
+opt_in() {
+  : > "$1/config/pi-scout-websearch"
+}
+
+# --- a Pi scout on an opted-in home with a key gets the tool -----------------
 
 read_case "$(make_case scout)"
+opt_in "$HOME_DIR"
 out=$(run_spawn "$KEY_FILE" "$HOME_DIR" "$WT_DIR" "$FAKEBIN" "$LAUNCH_LOG" \
   "$CASE_ID" "$PROJ_DIR" --scout --harness pi)
 launch=$(cat "$LAUNCH_LOG")
@@ -123,7 +131,7 @@ launch=$(cat "$LAUNCH_LOG")
 grep -Eq -- "-e '?${EXT}'? " "$LAUNCH_LOG" ||
   fail "a Pi scout should launch with the web-search extension: $out"$'\n'"$launch"
 assert_contains "$launch" ".pi-ext.ts" "a Pi scout should keep its existing per-task extension"
-pass "a Pi scout on a home with a key launches with web search"
+pass "a Pi scout on an opted-in home with a key launches with web search"
 
 # The credential itself must not ride along into the worker's launch: the whole
 # point is that the worker gets a tool, not a key.
@@ -131,9 +139,28 @@ assert_not_contains "$launch" "$KEY" "the launch command must never carry the ke
 assert_not_contains "$launch" "OLLAMA_API_KEY" "the launch command must not name the key variable"
 pass "the worker is launched with a tool, never with the credential"
 
-# --- an implementation worker does not ---------------------------------------
+# --- a key without the opt-in flag wires nothing -----------------------------
+#
+# The key file predates this feature: homes configured it for usage reporting
+# long before scouts could spend through it. Its presence alone must therefore
+# never turn the tool on, and the spawn stays silent because nothing the
+# captain enabled is missing.
+
+read_case "$(make_case keynoflag)"
+out=$(run_spawn "$KEY_FILE" "$HOME_DIR" "$WT_DIR" "$FAKEBIN" "$LAUNCH_LOG" \
+  "$CASE_ID" "$PROJ_DIR" --scout --harness pi)
+launch=$(cat "$LAUNCH_LOG")
+assert_not_contains "$launch" "fm-pi-websearch-ext.ts" \
+  "a key configured for usage reporting must not wire the tool without the captain's opt-in: $out"
+assert_contains "$launch" ".pi-ext.ts" "the scout should still launch normally"
+assert_not_contains "$out" "without web search" \
+  "a home that never opted in should not be nagged about the tool"
+pass "a key alone never wires web search; the opt-in flag is required"
+
+# --- an implementation worker does not, even on an opted-in home -------------
 
 read_case "$(make_case ship)"
+opt_in "$HOME_DIR"
 out=$(run_spawn "$KEY_FILE" "$HOME_DIR" "$WT_DIR" "$FAKEBIN" "$LAUNCH_LOG" \
   "$CASE_ID" "$PROJ_DIR" --mode no-mistakes --yolo off --harness pi)
 launch=$(cat "$LAUNCH_LOG")
@@ -142,9 +169,10 @@ assert_not_contains "$launch" "fm-pi-websearch-ext.ts" \
   "a Pi ship worker must not get web search"
 pass "a Pi implementation worker launches without web search"
 
-# --- no key configured means no tool, and no failed spawn --------------------
+# --- opted in but no key configured means no tool, and no failed spawn -------
 
 read_case "$(make_case nokey)"
+opt_in "$HOME_DIR"
 out=$(run_spawn "$ABSENT_KEY" "$HOME_DIR" "$WT_DIR" "$FAKEBIN" "$LAUNCH_LOG" \
   "$CASE_ID" "$PROJ_DIR" --scout --harness pi)
 launch=$(cat "$LAUNCH_LOG")
@@ -152,7 +180,7 @@ assert_not_contains "$launch" "fm-pi-websearch-ext.ts" \
   "a home with no key must not wire the tool: $out"
 assert_contains "$launch" ".pi-ext.ts" "the scout should still launch normally"
 assert_contains "$out" "without web search" "the spawn should say why the tool is absent"
-pass "a home with no key launches the scout unchanged, and says so"
+pass "an opted-in home with no key launches the scout unchanged, and says so"
 
 # --- other harnesses are untouched -------------------------------------------
 #
@@ -160,6 +188,7 @@ pass "a home with no key launches the scout unchanged, and says so"
 # would be a duplicate; the placeholder must also never survive into a launch.
 
 read_case "$(make_case claudescout)"
+opt_in "$HOME_DIR"
 out=$(run_spawn "$KEY_FILE" "$HOME_DIR" "$WT_DIR" "$FAKEBIN" "$LAUNCH_LOG" \
   "$CASE_ID" "$PROJ_DIR" --scout --harness claude)
 launch=$(cat "$LAUNCH_LOG")
