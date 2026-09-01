@@ -1,0 +1,19 @@
+# Manual E2E demo - a real Pi scout session using the web_search tool
+# The installed Pi (0.84.2) runs with ONLY the firstmate extension loaded
+# (--no-builtin-tools), so any search proves the registered tool executed.
+# The endpoint is a local stub standing in for https://ollama.com/api/web_search.
+
+$ pi --print --no-session --no-context-files --no-extensions --no-skills --no-builtin-tools \
+    -e bin/fm-pi-websearch-ext.ts --model ollama/deepseek-v4-flash:cloud --thinking off \
+    "Call the web_search tool with the query: pi coding agent release notes. Then report the first result title and whether its content was truncated."
+
+- **First result title:** "Pi coding agent 0.84.2 release notes"
+- **Content truncated:** Yes (`"truncated": true`)
+(exit 0)
+
+## What the tool actually sent to the endpoint during that session
+request body:         {"query":"pi coding agent release notes","max_results":3}
+Authorization header: Bearer sk-demo-FIXTURE-0123456789abcdef
+
+## Key confinement in what the agent saw
+occurrences of the key anywhere in Pi's transcript: 0

@@ -1,0 +1,40 @@
+FM_TEST_BEGIN 2026-09-01T12:09:22Z tests/fm-ollama-websearch.test.sh family=pure-contract-unit expected_gate_skip=none
+ok - a successful search prints results without the key
+ok - the key reaches the endpoint, and only the endpoint
+ok - the key is absent from the child's argv and environment, and present only on its stdin
+ok - a search writes nothing to disk
+ok - a key at a default location is never sent anywhere but Ollama
+ok - naming the default key file explicitly does not open the redirect
+ok - the redirect seam cannot point off the local machine
+ok - results come back as structured JSON and the request carries the query
+ok - a query carrying quotes and backslashes cannot rewrite the request
+ok - over-long results are truncated and marked, short ones are left alone
+ok - status reports availability without disclosing the key
+ok - a malformed key is refused without being echoed
+ok - upstream rejections and malformed responses fail loudly and quietly
+ok - the option surface is closed and help works without a key
+ok - fm-ollama-websearch behavior contract
+FM_TEST_END 2026-09-01T12:09:24Z tests/fm-ollama-websearch.test.sh exit=0 duration_ms=1829 gate_skip=false
+FM_TEST_BEGIN 2026-09-01T12:09:24Z tests/fm-pi-websearch-spawn.test.sh family=backend-dispatch expected_gate_skip=none
+ok - a Pi scout on a home with a key launches with web search
+ok - the worker is launched with a tool, never with the credential
+ok - a Pi implementation worker launches without web search
+ok - a home with no key launches the scout unchanged, and says so
+ok - a Claude scout is left alone
+ok - pi web-search spawn exposure
+FM_TEST_END 2026-09-01T12:09:37Z tests/fm-pi-websearch-spawn.test.sh exit=0 duration_ms=12820 gate_skip=false
+FM_TEST_BEGIN 2026-09-01T12:09:37Z tests/fm-pi-primary-types.test.sh family=pure-contract-unit expected_gate_skip=none
+ok - tracked Pi extensions pass strict no-emit typecheck against Pi 0.84.2
+FM_TEST_END 2026-09-01T12:09:40Z tests/fm-pi-primary-types.test.sh exit=0 duration_ms=2883 gate_skip=false
+FM_TEST_BEGIN 2026-09-01T12:09:40Z tests/fm-pi-websearch-live-e2e.test.sh family=live-harness-optin expected_gate_skip=optin-env
+ok - Pi 0.84.2 registers web_search and executes it through the proxy
+ok - the search results reached the model
+FM_TEST_END 2026-09-01T12:09:44Z tests/fm-pi-websearch-live-e2e.test.sh exit=0 duration_ms=4592 gate_skip=false
+FM_TEST_SUMMARY total=4 failed=0 skipped_gate=0 duration_ms=22297
+FM_TEST_SUMMARY_FAMILY family=backend-dispatch count=1 duration_ms=12820 failed=0
+FM_TEST_SUMMARY_FAMILY family=live-harness-optin count=1 duration_ms=4592 failed=0
+FM_TEST_SUMMARY_FAMILY family=pure-contract-unit count=2 duration_ms=4712 failed=0
+FM_TEST_SLOWEST rank=1 script=tests/fm-pi-websearch-spawn.test.sh duration_ms=12820
+FM_TEST_SLOWEST rank=2 script=tests/fm-pi-websearch-live-e2e.test.sh duration_ms=4592
+FM_TEST_SLOWEST rank=3 script=tests/fm-pi-primary-types.test.sh duration_ms=2883
+FM_TEST_SLOWEST rank=4 script=tests/fm-ollama-websearch.test.sh duration_ms=1829

@@ -1,0 +1,42 @@
+# Manual E2E demo - key-holding web-search proxy, driven as the Pi extension drives it
+# Endpoint: a local stub standing in for https://ollama.com/api/web_search (no quota spent).
+# Fixture key in a caller-supplied env file: OLLAMA_API_KEY=sk-demo-FIXTURE-0123456789abcdef
+
+$ bin/fm-ollama-websearch.sh status
+configured: web search key available from /tmp/fm-websearch-demo.VUsKGr/key.env
+(exit 0)
+
+$ bin/fm-ollama-websearch.sh search --query "pi coding agent release notes"
+{
+  "results": [
+    {
+      "title": "Pi coding agent 0.84.2 release notes",
+      "url": "https://example.test/pi-release",
+      "content": "Pi 0.84.2 ships registerTool for extensions. Pi 0.84.2 ships registerTool for extensions. Pi 0.84.2 ships registerTool for extensions. Pi 0.84.2 ships registerTool for extensions. Pi 0.84.2 ships registerTool for extensions. Pi 0.84.2 ships registerTool for extensions. Pi 0.84.2 ships registerTool for extensions. Pi 0.84.2 ships registerTool for extensions. Pi 0.84.2 ships registerTool for extensions. Pi 0.84.2 ships registerTool for extensions. Pi 0.84.2 ships registerTool for extensions. Pi 0.84.2 ships registerTool for extensions. Pi 0.84.2 ships registerTool for extensions. Pi 0.84.2 ships registerTool for extensions. Pi 0.84.2 ships registerTool for extensions. Pi 0.84.2 ships registerTool for extensions. Pi 0.84.2 ships registerTool for extensions. Pi 0.84.2 ships registerTool for extensions. Pi 0.84.2 ships registerTool for extensions. Pi 0.84.2 ships registerTool for extensions. Pi 0.84.2 ships registerTool for extensions. Pi 0.84.2 ships registerTool for extensions. Pi 0.84.2 ships registerTool for extensions. Pi 0.84.2 ships registerTool for extensions. Pi 0.84.2 ships registerTool for extensions. Pi 0.84.2 ships registerTool for extensions. Pi 0.84.2 ships registerTool for extensions. Pi 0.84.2 ships registerTool for extensions. Pi 0.84.2 ships registerTool for extensions. Pi 0.84.2 ships registerTool for extensions. Pi 0.84.2 ships registerTool for extensions. Pi 0.84.2 ships registerTool for extensions. Pi 0.84.2 ships registerTool for extensions. Pi 0.84.2 ships registerTool for extensions. Pi 0.84.2 ships registerTool for extensions. Pi 0.84.2 ships registerTool for extensions. Pi 0.84.2 ships registerTool for extensions. Pi 0.84.2 ships registerTool for extensions. Pi 0.84.2 ships registerTool for extensions. Pi 0.84.2 ships registerTool for extensions. Pi 0.84.2 ships registerTool for extensions. Pi 0.84.2 ships registerTool for extensions. Pi 0.84.2 ships registerTool for extensions. Pi 0.84.2 ships registerTool for extensions. Pi 0.84.2 ships regi\n[truncated]",
+      "truncated": true
+    },
+    {
+      "title": "A second, short result",
+      "url": "https://example.test/two",
+      "content": "a short snippet",
+      "truncated": false
+    }
+  ]
+}
+(exit 0; stderr: 0 bytes)
+
+## The one legitimate channel carrying the key: the request to the endpoint itself
+Stub-recorded Authorization header of the request: Bearer sk-demo-FIXTURE-0123456789abcdef
+Stub-recorded request body:                        {"query":"pi coding agent release notes","max_results":3}
+
+## Key confinement on every surface the agent can read
+occurrences of the key in search stdout: 0
+occurrences of the key in search stderr: 0
+occurrences of the key in status output: 0
+(child argv / child environment / no-file-written are asserted by tests/fm-ollama-websearch.test.sh with a recording curl)
+
+## Truncation is explicit, never silent
+result[0]: content length 2012 chars, truncated=true (upstream sent 3149 chars)
+result[1]: content length 15 chars, truncated=false
+tail of result[0].content: ...0.84.2 ships regi
+[truncated]
