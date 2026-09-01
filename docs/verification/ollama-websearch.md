@@ -49,7 +49,17 @@ The upstream `content` field is a whole-page dump, not a snippet.
 Three results for a single query measured `103600` bytes (`wc -c`), roughly 26k tokens for one call.
 
 This is the reason `bin/fm-ollama-websearch.sh` reshapes rather than relays: it returns three results by default and truncates each `content`, marking the result `truncated: true` so a scout never quotes a cut-off page as if it were whole.
-The same query through the proxy at its defaults returned 4638 bytes.
+
+The same query through the proxy at its defaults returned `6688` bytes for the same three results, all three marked truncated:
+
+```
+$ bin/fm-ollama-websearch.sh search --query "firstmate agent framework" | wc -c
+    6688
+$ ... | jq -c '[.results[].truncated]'
+[true,true,true]
+```
+
+That is a 15x reduction against the `103600` bytes the same three results carry upstream.
 
 ## The key is not disclosed through the proxy
 
