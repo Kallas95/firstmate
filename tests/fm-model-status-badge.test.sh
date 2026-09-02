@@ -6,7 +6,6 @@ set -u
 . "$(dirname "${BASH_SOURCE[0]}")/lib.sh"
 
 EXT="$ROOT/.pi/extensions/fm-model-status-badge.ts"
-PI_PACKAGE_DIR=${FM_PI_PACKAGE_DIR:-"$(npm root -g 2>/dev/null)/@earendil-works/pi-coding-agent"}
 TMP_ROOT=$(fm_test_tmproot fm-model-status-badge)
 
 cleanup() {
@@ -14,21 +13,30 @@ cleanup() {
 }
 trap cleanup EXIT
 
-if ! command -v node >/dev/null 2>&1 || ! command -v npm >/dev/null 2>&1; then
-  echo "skip: node or npm not found for Pi model-status badge test"
-  exit 0
-fi
-if [ ! -f "$PI_PACKAGE_DIR/package.json" ]; then
-  echo "skip: installed @earendil-works/pi-coding-agent package not found"
+if ! command -v node >/dev/null 2>&1; then
+  echo "skip: node not found for Pi model-status badge test"
   exit 0
 fi
 
-mkdir -p "$TMP_ROOT/project/node_modules/@earendil-works"
+mkdir -p "$TMP_ROOT/project"
 cp "$EXT" "$TMP_ROOT/project/fm-model-status-badge.ts"
-ln -s "$PI_PACKAGE_DIR" "$TMP_ROOT/project/node_modules/@earendil-works/pi-coding-agent"
 printf '%s\n' '{"type":"module"}' >"$TMP_ROOT/project/package.json"
+cat >"$TMP_ROOT/project/typescript-loader.mjs" <<'JS'
+import { readFile } from "node:fs/promises";
 
-out=$(cd "$TMP_ROOT/project" && node --input-type=module 2>&1 <<'JS'
+export async function load(url, context, nextLoad) {
+  if (!new URL(url).pathname.endsWith(".ts")) return nextLoad(url, context);
+
+  let source = await readFile(new URL(url), "utf8");
+  source = source
+    .replace(/^import type .*;\r?\n/m, "")
+    .replace(/:\s*(?:ExtensionAPI|ExtensionContext)(?=\))/g, "")
+    .replace(/:\s*void(?=\s*\{)/g, "");
+  return { format: "module", shortCircuit: true, source };
+}
+JS
+
+out=$(cd "$TMP_ROOT/project" && node --no-warnings --experimental-loader ./typescript-loader.mjs --input-type=module 2>&1 <<'JS'
 import { pathToFileURL } from "node:url";
 
 const handlers = new Map();
