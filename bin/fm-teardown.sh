@@ -237,6 +237,8 @@ CONTROL_LOCK="$STATE/.control-$ID.lock"
 CONTROL_LOCK_HELD=0
 META_LOCK=
 META_LOCK_HELD=0
+WORKTREE_TRANSITION_LOCK=
+WORKTREE_TRANSITION_LOCK_HELD=0
 DESCENDANT_LOCK_PATHS=()
 DESCENDANT_TASK_STATES=()
 DESCENDANT_TASK_IDS=()
@@ -262,6 +264,10 @@ teardown_release_locks() {
   if [ -n "${LOCAL_REGISTRY_LOCK:-}" ]; then
     fm_lock_release "$LOCAL_REGISTRY_LOCK" || true
     LOCAL_REGISTRY_LOCK=
+  fi
+  if [ "$WORKTREE_TRANSITION_LOCK_HELD" = 1 ]; then
+    fm_lock_release "$WORKTREE_TRANSITION_LOCK" || true
+    WORKTREE_TRANSITION_LOCK_HELD=0
   fi
   if [ "$META_LOCK_HELD" = 1 ]; then
     fm_lock_release "$META_LOCK" || true
@@ -2629,7 +2635,19 @@ resolve_worktree_ownership() {
 
 validate_pr_poll_cleanup "$STATE" "$ID" || exit 1
 
+if [ "$KIND" != secondmate ] && [ "$BACKEND" != orca ] && [ -n "$WT" ]; then
+  WORKTREE_TRANSITION_LOCK=$(fm_task_set_lock_path "$STATE") || {
+    echo "error: could not resolve the worktree transition lock for $STATE" >&2
+    exit 1
+  }
+  fm_lock_acquire_wait "$WORKTREE_TRANSITION_LOCK" || exit 1
+  WORKTREE_TRANSITION_LOCK_HELD=1
+fi
 resolve_worktree_ownership
+if [ "$WORKTREE_OWNED_BY_TASK" -ne 1 ] && [ "$WORKTREE_TRANSITION_LOCK_HELD" = 1 ]; then
+  fm_lock_release "$WORKTREE_TRANSITION_LOCK" || exit 1
+  WORKTREE_TRANSITION_LOCK_HELD=0
+fi
 
 if [ "$KIND" = secondmate ]; then
   LOCAL_REGISTRY_LOCK=$(secondmate_registry_lock_path "$STATE")
@@ -2851,6 +2869,10 @@ elif [ -d "$WT" ] && [ "$KIND" != secondmate ] && [ "$WORKTREE_OWNED_BY_TASK" = 
   # sanctioned rerun never re-returns a slot the pool may reissue meanwhile.
   touch "$WORKTREE_RETURN_MARKER" 2>/dev/null \
     || echo "warning: could not record the completed worktree return for $ID at $WORKTREE_RETURN_MARKER; a rerun will rely on live fleet bindings to skip the return" >&2
+  if [ "$WORKTREE_TRANSITION_LOCK_HELD" = 1 ]; then
+    fm_lock_release "$WORKTREE_TRANSITION_LOCK" || exit 1
+    WORKTREE_TRANSITION_LOCK_HELD=0
+  fi
 fi
 
 HERDR_PRESENTATION_JOURNAL="$STATE/$ID.herdr-presentation"

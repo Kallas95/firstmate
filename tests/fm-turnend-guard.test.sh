@@ -1508,6 +1508,25 @@ test_hook_claude_mode_bounds_blocks_when_the_auto_arm_never_claims() {
   pass "fm-turnend-guard --claude: consecutive blocks are bounded and alarm once even when the auto-arm never claims the home (incident regression)"
 }
 
+test_hook_claude_mode_default_stall_alarm_precedes_hard_override() {
+  local dir out status i
+  dir=$(make_primary_dir "$TMP_ROOT/hook-claude-default-stall-bound")
+  : > "$dir/state/task1.meta"
+  seed_frozen_ledger "$dir"
+
+  for i in 1 2 3 4 5 6 7; do
+    out=$(FM_CLAUDE_AUTOARM_SYNC_WAIT_MS=100 run_hook_claude "$dir" true); status=$?
+    expect_code 2 "$status" "default stall block $i must refuse the blind turn end"
+    assert_not_contains "$out" 'GENUINELY DOWN' "the default stall alarm fired before seven blocks"
+  done
+  out=$(FM_CLAUDE_AUTOARM_SYNC_WAIT_MS=100 run_hook_claude "$dir" true); status=$?
+  expect_code 0 "$status" "the eighth Stop attempt must alarm rather than become an eighth blocked Stop"
+  assert_contains "$out" 'FIRSTMATE SUPERVISION IS GENUINELY DOWN' "the pre-override attended alarm is missing"
+  [ "$(budget_field "$dir" stalled)" = 8 ] \
+    || fail "the default alarm did not occur on the eighth Stop attempt: $(budget_field "$dir" stalled)"
+  pass "fm-turnend-guard --claude: the default attended alarm precedes Claude's eight-block override"
+}
+
 test_hook_claude_mode_stall_bound_resets_on_a_turn_it_lets_through() {
   local dir out status i
   dir=$(make_primary_dir "$TMP_ROOT/hook-claude-stall-reset")
@@ -1916,6 +1935,7 @@ test_hook_claude_mode_allows_on_open_generation_claim
 test_hook_claude_mode_blocks_on_stuck_generation_claim
 test_hook_claude_mode_terminal_fail_open_clears_abandoned_claim
 test_hook_claude_mode_bounds_blocks_when_the_auto_arm_never_claims
+test_hook_claude_mode_default_stall_alarm_precedes_hard_override
 test_hook_claude_mode_stall_bound_resets_on_a_turn_it_lets_through
 test_hook_claude_mode_stall_bound_stays_shut_in_away_mode
 test_hook_claude_mode_preserves_fresh_failed_progression

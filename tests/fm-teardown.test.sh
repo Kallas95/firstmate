@@ -2690,6 +2690,87 @@ test_rerun_after_return_and_reissue_never_rereturns() {
   pass "a rerun after a completed return and a reissued slot closes the pane and cleans records without re-returning"
 }
 
+test_marker_failure_reissue_before_rerun_preserves_new_tenant() {
+  local case_dir log closed rc spawn_pid rerun_pid i rerun_status
+  case_dir=$(make_case marker-failure-reissue-race)
+  write_meta "$case_dir" local-only ship
+  wt_commit "$case_dir" "landed work"
+  merge_wt_into_local_main "$case_dir"
+  configure_flat_herdr_teardown_case "$case_dir"
+  log="$case_dir/herdr.log"; : > "$log"
+  closed="$case_dir/closed"
+  : > "$case_dir/state/task-x1.status"
+  : > "$case_dir/treehouse.log"
+  cat > "$case_dir/fakebin/treehouse" <<SH
+#!/usr/bin/env bash
+printf '%s\n' "\$*" >> "$case_dir/treehouse.log"
+ln -s "$case_dir/missing/marker" "$case_dir/state/task-x1.worktree-returned"
+exit 0
+SH
+  chmod +x "$case_dir/fakebin/treehouse"
+
+  rc=0
+  FM_FAKE_HERDR_LOG="$log" FM_FAKE_HERDR_CLOSED="$case_dir/noexist/closed" \
+    run_teardown "$case_dir" > "$case_dir/stdout" 2> "$case_dir/stderr" || rc=$?
+  [ "$rc" -ne 0 ] || fail "marker-failure-race: attempt 1 succeeded although its pane stayed open"
+  assert_grep "could not record the completed worktree return" "$case_dir/stderr" \
+    "marker-failure-race: the fixture did not force marker publication to fail"
+  rm -f "$case_dir/state/task-x1.worktree-returned"
+
+  (
+    . "$ROOT/bin/fm-wake-lib.sh"
+    lock=$(fm_task_set_lock_path "$case_dir/state") || exit 1
+    fm_lock_acquire_wait "$lock" || exit 1
+    git -C "$case_dir/wt" checkout -q -b fm/task-x2 || exit 1
+    printf '%s\n' "tenant work in flight" > "$case_dir/wt/tenant.txt" || exit 1
+    : > "$case_dir/reissue-acquired"
+    while [ ! -e "$case_dir/allow-meta-publish" ]; do sleep 0.05; done
+    cat > "$case_dir/state/.task-x2.meta.spawn" <<EOF
+window=default:wZ:pZ
+endpoint_task_id=task-x2
+worktree=$case_dir/wt
+project=$case_dir/project
+kind=scout
+mode=no-mistakes
+backend=herdr
+EOF
+    mv "$case_dir/state/.task-x2.meta.spawn" "$case_dir/state/task-x2.meta" || exit 1
+    fm_lock_release "$lock" || exit 1
+  ) &
+  spawn_pid=$!
+  for i in $(seq 1 100); do
+    [ ! -e "$case_dir/reissue-acquired" ] || break
+    sleep 0.05
+  done
+  [ -e "$case_dir/reissue-acquired" ] || fail "marker-failure-race: replacement spawn never acquired the slot"
+
+  (
+    FM_FAKE_HERDR_LOG="$log" FM_FAKE_HERDR_CLOSED="$closed" FM_BACKEND_HERDR_IDLE_SHELL_PROOF_POLLS=1 \
+      run_teardown "$case_dir" > "$case_dir/stdout2" 2> "$case_dir/stderr2"
+    printf '%s\n' "$?" > "$case_dir/rerun.status"
+  ) &
+  rerun_pid=$!
+  sleep 0.3
+  kill -0 "$rerun_pid" 2>/dev/null \
+    || fail "marker-failure-race: rerun did not wait for the replacement binding publication"
+  [ "$(wc -l < "$case_dir/treehouse.log")" -eq 1 ] \
+    || fail "marker-failure-race: rerun returned the slot before replacement metadata publication"
+
+  : > "$case_dir/allow-meta-publish"
+  wait "$spawn_pid" || fail "marker-failure-race: replacement spawn failed"
+  wait "$rerun_pid"
+  rerun_status=$(cat "$case_dir/rerun.status")
+  [ "$rerun_status" -eq 0 ] || fail "marker-failure-race: rerun failed: $(cat "$case_dir/stderr2")"
+  [ "$(wc -l < "$case_dir/treehouse.log")" -eq 1 ] \
+    || fail "marker-failure-race: rerun re-returned the replacement tenant's slot"
+  [ "$(git -C "$case_dir/wt" rev-parse --abbrev-ref HEAD)" = "fm/task-x2" ] \
+    || fail "marker-failure-race: rerun moved the replacement tenant's branch"
+  [ -f "$case_dir/wt/tenant.txt" ] || fail "marker-failure-race: rerun destroyed replacement tenant work"
+  [ -e "$case_dir/state/task-x2.meta" ] || fail "marker-failure-race: rerun removed replacement tenant metadata"
+  [ ! -e "$case_dir/state/task-x1.meta" ] || fail "marker-failure-race: rerun retained predecessor metadata"
+  pass "marker failure and pre-publication slot reissue leave the replacement tenant untouched"
+}
+
 # A plain first-run teardown of a task that still owns its worktree must return
 # it exactly as before the guard existed.
 test_first_run_still_returns_worktree() {
@@ -2873,6 +2954,7 @@ test_persistent_scan_refuses_after_bounded_retries
 test_process_exit_during_identity_lookup_does_not_refuse
 test_run_abort_precedes_process_reap_precedes_worktree_removal
 test_rerun_after_return_and_reissue_never_rereturns
+test_marker_failure_reissue_before_rerun_preserves_new_tenant
 test_first_run_still_returns_worktree
 test_rerun_still_bound_unreturned_returns
 test_reissued_slot_without_marker_skips_return
