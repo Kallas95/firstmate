@@ -67,27 +67,6 @@ backfill_session_binding() {
   fm_session_lock_publish_identity "$STATE" "$old" || true
 }
 
-if [ -f "$LOCK" ] && [ ! -L "$LOCK" ]; then
-  old=$(cat "$LOCK" 2>/dev/null || true)
-  if fm_session_lock_owned_by_self "$STATE"; then
-    backfill_session_binding
-    echo "lock acquired: harness pid $old"
-    exit 0
-  fi
-  # The same session presents a different ancestry through a reparented worker
-  # pool, so the pid comparison above can fail for the very session that
-  # acquired this lock. The recorded identity answers that, and the lock is left
-  # naming its original owner rather than this call's outermost pid.
-  if fm_session_lock_owned_by_session_identity "$STATE"; then
-    echo "lock acquired: harness pid $old"
-    exit 0
-  fi
-  if fm_harness_pid_alive "$old"; then
-    echo "error: another live firstmate session holds the lock (pid $old); operate read-only until resolved" >&2
-    exit 1
-  fi
-fi
-
 if ! fm_lock_try_acquire "$CLAIM_LOCK"; then
   sweep_pid=$(sed -n 's/^pid=//p' "$STATE/.startup-network.status" 2>/dev/null | tail -1)
   if [ -n "${FM_LOCK_HELD_PID:-}" ] && [ "$FM_LOCK_HELD_PID" = "$sweep_pid" ]; then

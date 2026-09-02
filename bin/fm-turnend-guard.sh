@@ -455,9 +455,9 @@ failure_episode_verified() {
 # A stop this guard lets through is progress, so the consecutive-block series
 # ends here. Only an uninterrupted run of blocked stops reaches the stall bound.
 budget_clear_stall() {
-  local session count epoch tmp
+  local session count epoch tmp status=0
   [ -f "$BUDGET_FILE" ] || return 0
-  fm_lock_try_acquire "$BUDGET_LOCK" || return 0
+  fm_lock_try_acquire "$BUDGET_LOCK" || return 1
   session=$(sed -n '1s/^session=//p' "$BUDGET_FILE" 2>/dev/null || true)
   count=$(sed -n '2s/^count=//p' "$BUDGET_FILE" 2>/dev/null || true)
   epoch=$(sed -n '3s/^epoch=//p' "$BUDGET_FILE" 2>/dev/null || true)
@@ -465,12 +465,14 @@ budget_clear_stall() {
     ''|*[!0-9]*) count=0 ;;
   esac
   tmp="$BUDGET_FILE.tmp.$$"
-  if printf 'session=%s\ncount=%s\nepoch=%s\nstalled=0\n' \
-      "$session" "$count" "$epoch" > "$tmp" 2>/dev/null; then
-    mv -f "$tmp" "$BUDGET_FILE" 2>/dev/null || true
+  if ! printf 'session=%s\ncount=%s\nepoch=%s\nstalled=0\n' \
+      "$session" "$count" "$epoch" > "$tmp" 2>/dev/null \
+    || ! mv -f "$tmp" "$BUDGET_FILE" 2>/dev/null; then
+    status=1
   fi
   rm -f "$tmp" 2>/dev/null || true
-  fm_lock_release "$BUDGET_LOCK"
+  fm_lock_release "$BUDGET_LOCK" || status=1
+  return "$status"
 }
 
 i=0
@@ -479,7 +481,7 @@ while [ "$i" -lt $((SYNC_WAIT_MS / 100)) ]; do
     if fm_watcher_healthy "$STATE" "$WATCH" "$GRACE" "$FM_HOME"; then
       fm_failure_episode_reset "$STATE" || exit 2
     fi
-    budget_clear_stall
+    budget_clear_stall || exit 2
     exit 0
   fi
   sleep 0.1
@@ -489,7 +491,7 @@ if autoarm_owns_recovery; then
   if fm_watcher_healthy "$STATE" "$WATCH" "$GRACE" "$FM_HOME"; then
     fm_failure_episode_reset "$STATE" || exit 2
   fi
-  budget_clear_stall
+  budget_clear_stall || exit 2
   exit 0
 fi
 
@@ -514,5 +516,8 @@ if [ "$terminal_status" -eq 0 ]; then
   fi
   exit 0
 fi
-[ "$terminal_status" -eq 2 ] && exit 0
+if [ "$terminal_status" -eq 2 ]; then
+  budget_clear_stall || exit 2
+  exit 0
+fi
 block_stop

@@ -307,6 +307,30 @@ SH
   chmod +x "$1/ps"
 }
 
+write_two_session_ps() {  # <fakebin> <old-session-pid> <new-session-pid>
+  cat > "$1/ps" <<SH
+#!/usr/bin/env bash
+set -u
+field= pid=
+while [ "\$#" -gt 0 ]; do
+  case "\$1" in
+    -o) field=\$2; shift 2 ;;
+    -p) pid=\$2; shift 2 ;;
+    *) shift ;;
+  esac
+done
+case "\$pid:\$field" in
+  $2:comm=|$3:comm=) printf '%s\n' claude ;;
+  $2:args=|$3:args=) printf '%s\n' 'claude --dangerously-skip-permissions' ;;
+  $2:ppid=|$3:ppid=) printf '%s\n' 1 ;;
+  *:comm=) printf '%s\n' bash ;;
+  *:args=) printf '%s\n' 'bash /repo/bin/fm-session-start.sh' ;;
+  *:ppid=) printf '%s\n' $2 ;;
+esac
+SH
+  chmod +x "$1/ps"
+}
+
 # The measured reparented pool, over real live pids:
 #   this process -> claude bg-spare <spare> -> claude bg-pty-host <host> -> init
 # and <session>, the lock owner, is live but unreachable from that chain.
@@ -424,6 +448,54 @@ test_e2e_existing_owned_lock_backfills_only_invalid_binding() {
   pass "session-lock identity e2e: legacy and invalid bindings backfill while valid bindings remain unchanged"
 }
 
+test_e2e_backfill_reproves_after_claim_lock_wait() {
+  local dir fakebin old_pid new_pid holder_pid call_pid i status expected
+  dir=$(new_home e2e-binding-backfill-takeover)
+  fakebin=$(fm_fakebin "$dir/bin")
+  spawn_live_pid; old_pid=$LIVE_PID
+  spawn_live_pid; new_pid=$LIVE_PID
+  write_two_session_ps "$fakebin" "$old_pid" "$new_pid"
+  printf '%s\n' "$old_pid" > "$dir/state/.lock"
+
+  (
+    . "$ROOT/bin/fm-wake-lib.sh"
+    fm_lock_acquire_wait "$dir/state/.lock.acquire" || exit 1
+    : > "$dir/claim-held"
+    while [ ! -e "$dir/release-claim" ]; do sleep 0.05; done
+    fm_lock_release "$dir/state/.lock.acquire"
+  ) &
+  holder_pid=$!
+  for i in $(seq 1 100); do
+    [ ! -e "$dir/claim-held" ] || break
+    sleep 0.05
+  done
+  [ -e "$dir/claim-held" ] || fail "binding-backfill-takeover: claim fixture never acquired the lock"
+
+  (
+    lock_sh "$dir" "$fakebin" "$SESSION" "$old_pid" > "$dir/call.out"
+    printf '%s\n' "$?" > "$dir/call.status"
+  ) &
+  call_pid=$!
+  sleep 0.3
+  kill -0 "$call_pid" 2>/dev/null || fail "binding-backfill-takeover: backfill bypassed the claim lock"
+
+  printf '%s\n' "$new_pid" > "$dir/state/.lock"
+  expected=$(printf 'pid=%s\nsession=%s' "$new_pid" "$OTHER_SESSION")
+  printf '%s\n' "$expected" > "$dir/state/.lock.session"
+  : > "$dir/release-claim"
+  wait "$holder_pid" || fail "binding-backfill-takeover: claim fixture failed"
+  wait "$call_pid"
+  status=$(cat "$dir/call.status")
+  [ "$status" -ne 0 ] || fail "binding-backfill-takeover: obsolete owner accepted the replacement lock"
+  [ "$(cat "$dir/state/.lock")" = "$new_pid" ] \
+    || fail "binding-backfill-takeover: obsolete owner replaced the new lock pid"
+  [ "$(cat "$dir/state/.lock.session")" = "$expected" ] \
+    || fail "binding-backfill-takeover: obsolete owner replaced the new session binding"
+
+  reap_live_pids
+  pass "session-lock identity e2e: backfill serializes with takeover and reproves ownership"
+}
+
 # --- hook membership when the exported pid is not the recorded owner ----------
 # The second, pid-shaped proof asks whether the pid the harness exports for this
 # event IS the pid the lock records. bin/fm-lock.sh deliberately records the
@@ -538,3 +610,4 @@ test_hook_is_readmitted_when_the_exported_pid_is_not_the_recorded_owner
 test_hook_binding_proof_refuses_every_unproven_shape
 test_e2e_acquire_records_the_binding_and_readmits_the_pool
 test_e2e_existing_owned_lock_backfills_only_invalid_binding
+test_e2e_backfill_reproves_after_claim_lock_wait

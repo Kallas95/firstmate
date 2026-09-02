@@ -1547,6 +1547,69 @@ test_hook_claude_mode_clamps_unsafe_stall_override() {
   pass "fm-turnend-guard --claude: unsafe stall overrides clamp below Claude's hard limit"
 }
 
+test_hook_claude_mode_terminal_recovery_clears_stall_series() {
+  local dir fakebin ready release once real_mv guard_pid out status pid identity i
+  dir=$(make_primary_dir "$TMP_ROOT/hook-claude-terminal-stall-recovery")
+  : > "$dir/state/task1.meta"
+  seed_frozen_ledger "$dir"
+  printf 'session=sess-claude-mode\ncount=1\nepoch=918\nstalled=7\n' > "$dir/state/.turnend-claude-blocks"
+  fakebin="$dir/fakebin"
+  ready="$dir/budget-ready"
+  release="$dir/budget-release"
+  once="$dir/budget-once"
+  real_mv=$(command -v mv)
+  mkdir -p "$fakebin"
+  cat > "$fakebin/mv" <<SH
+#!/usr/bin/env bash
+target=
+for arg in "\$@"; do target=\$arg; done
+if [ "\$target" = "\$FM_RACE_BUDGET" ] \
+  && (set -C; : > "\$FM_RACE_ONCE") 2>/dev/null; then
+  : > "\$FM_RACE_READY"
+  while [ ! -e "\$FM_RACE_RELEASE" ]; do sleep 0.05; done
+fi
+exec "$real_mv" "\$@"
+SH
+  chmod +x "$fakebin/mv"
+
+  (
+    printf '{"stop_hook_active":true,"session_id":"sess-claude-mode"}' \
+      | PATH="$fakebin:$PATH" FM_RACE_BUDGET="$dir/state/.turnend-claude-blocks" \
+        FM_RACE_ONCE="$once" FM_RACE_READY="$ready" FM_RACE_RELEASE="$release" \
+        FM_CLAUDE_AUTOARM_SYNC_WAIT_MS=100 CLAUDECODE=1 FM_HOME="$dir" \
+        bash "$dir/bin/fm-turnend-guard.sh" --claude > "$dir/guard.out" 2>&1
+    printf '%s\n' "$?" > "$dir/guard.status"
+  ) &
+  guard_pid=$!
+  for i in $(seq 1 100); do
+    [ ! -e "$ready" ] || break
+    sleep 0.05
+  done
+  [ -e "$ready" ] || fail "terminal-stall-recovery: guard never reached the threshold boundary"
+
+  sleep 60 &
+  pid=$!
+  identity=$(fm_test_pid_identity "$pid") || fail "terminal-stall-recovery: could not identify claim owner"
+  printf 'epoch=919 owner_pid=%s outcome=arming updated_at=%s\n%s\n' "$pid" "$(date +%s)" "$identity" \
+    > "$dir/state/.claude-autoarm-epoch"
+  : > "$dir/state/.last-watcher-beat"
+  : > "$release"
+  wait "$guard_pid"
+  status=$(cat "$dir/guard.status")
+  expect_code 0 "$status" "a claim opening at the terminal boundary must own recovery"
+  [ "$(budget_field "$dir" stalled)" = 0 ] \
+    || fail "terminal-stall-recovery: recovery-owned allow retained the exhausted stall counter"
+
+  kill "$pid" 2>/dev/null || true
+  wait "$pid" 2>/dev/null || true
+  seed_frozen_ledger "$dir"
+  out=$(FM_CLAUDE_AUTOARM_SYNC_WAIT_MS=100 run_hook_claude "$dir" true); status=$?
+  expect_code 2 "$status" "a fault after terminal recovery must start a new blocked series"
+  [ "$(budget_field "$dir" stalled)" = 1 ] \
+    || fail "terminal-stall-recovery: later fault did not restart the stall series at one"
+  pass "fm-turnend-guard --claude: terminal recovery clears exhausted stall progression"
+}
+
 test_hook_claude_mode_stall_bound_resets_on_a_turn_it_lets_through() {
   local dir out status i
   dir=$(make_primary_dir "$TMP_ROOT/hook-claude-stall-reset")
@@ -1957,6 +2020,7 @@ test_hook_claude_mode_terminal_fail_open_clears_abandoned_claim
 test_hook_claude_mode_bounds_blocks_when_the_auto_arm_never_claims
 test_hook_claude_mode_default_stall_alarm_precedes_hard_override
 test_hook_claude_mode_clamps_unsafe_stall_override
+test_hook_claude_mode_terminal_recovery_clears_stall_series
 test_hook_claude_mode_stall_bound_resets_on_a_turn_it_lets_through
 test_hook_claude_mode_stall_bound_stays_shut_in_away_mode
 test_hook_claude_mode_preserves_fresh_failed_progression
