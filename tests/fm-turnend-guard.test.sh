@@ -1527,6 +1527,26 @@ test_hook_claude_mode_default_stall_alarm_precedes_hard_override() {
   pass "fm-turnend-guard --claude: the default attended alarm precedes Claude's eight-block override"
 }
 
+test_hook_claude_mode_clamps_unsafe_stall_override() {
+  local dir out status i
+  dir=$(make_primary_dir "$TMP_ROOT/hook-claude-clamped-stall-bound")
+  : > "$dir/state/task1.meta"
+  seed_frozen_ledger "$dir"
+
+  for i in 1 2 3 4 5 6 7; do
+    out=$(FM_CLAUDE_TURNEND_STALL_BUDGET=99 FM_CLAUDE_AUTOARM_SYNC_WAIT_MS=100 \
+      run_hook_claude "$dir" true); status=$?
+    expect_code 2 "$status" "clamped stall block $i must refuse the blind turn end"
+  done
+  out=$(FM_CLAUDE_TURNEND_STALL_BUDGET=99 FM_CLAUDE_AUTOARM_SYNC_WAIT_MS=100 \
+    run_hook_claude "$dir" true); status=$?
+  expect_code 0 "$status" "an unsafe stall override must alarm before the hard override"
+  assert_contains "$out" 'FIRSTMATE SUPERVISION IS GENUINELY DOWN' "the clamped override produced no attended alarm"
+  [ "$(budget_field "$dir" stalled)" = 8 ] \
+    || fail "the unsafe override was not clamped to seven blocked Stops: $(budget_field "$dir" stalled)"
+  pass "fm-turnend-guard --claude: unsafe stall overrides clamp below Claude's hard limit"
+}
+
 test_hook_claude_mode_stall_bound_resets_on_a_turn_it_lets_through() {
   local dir out status i
   dir=$(make_primary_dir "$TMP_ROOT/hook-claude-stall-reset")
@@ -1936,6 +1956,7 @@ test_hook_claude_mode_blocks_on_stuck_generation_claim
 test_hook_claude_mode_terminal_fail_open_clears_abandoned_claim
 test_hook_claude_mode_bounds_blocks_when_the_auto_arm_never_claims
 test_hook_claude_mode_default_stall_alarm_precedes_hard_override
+test_hook_claude_mode_clamps_unsafe_stall_override
 test_hook_claude_mode_stall_bound_resets_on_a_turn_it_lets_through
 test_hook_claude_mode_stall_bound_stays_shut_in_away_mode
 test_hook_claude_mode_preserves_fresh_failed_progression

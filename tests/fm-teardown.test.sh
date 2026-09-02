@@ -2690,6 +2690,61 @@ test_rerun_after_return_and_reissue_never_rereturns() {
   pass "a rerun after a completed return and a reissued slot closes the pane and cleans records without re-returning"
 }
 
+test_teardown_and_spawn_share_task_set_first_lock_order() {
+  local case_dir holder_pid teardown_pid i status
+  case_dir=$(make_case task-set-lock-order)
+  write_meta "$case_dir" local-only ship
+  wt_commit "$case_dir" "landed work"
+  merge_wt_into_local_main "$case_dir"
+  add_logging_treehouse "$case_dir"
+
+  (
+    . "$ROOT/bin/fm-wake-lib.sh"
+    set_lock=$(fm_task_set_lock_path "$case_dir/state") || exit 1
+    meta_lock=$(fm_meta_lock_path "$case_dir/state/task-x1.meta") || exit 1
+    fm_lock_acquire_wait "$set_lock" || exit 1
+    : > "$case_dir/task-set-held"
+    while [ ! -e "$case_dir/acquire-meta" ]; do sleep 0.05; done
+    fm_lock_acquire_wait "$meta_lock" || exit 1
+    : > "$case_dir/meta-held"
+    while [ ! -e "$case_dir/release-spawn-locks" ]; do sleep 0.05; done
+    fm_lock_release "$meta_lock" || exit 1
+    fm_lock_release "$set_lock" || exit 1
+  ) &
+  holder_pid=$!
+  for i in $(seq 1 100); do
+    [ ! -e "$case_dir/task-set-held" ] || break
+    sleep 0.05
+  done
+  [ -e "$case_dir/task-set-held" ] || fail "task-set-lock-order: spawn fixture never acquired the task-set lock"
+
+  (
+    run_teardown "$case_dir" > "$case_dir/stdout" 2> "$case_dir/stderr"
+    printf '%s\n' "$?" > "$case_dir/teardown.status"
+  ) &
+  teardown_pid=$!
+  sleep 0.3
+  : > "$case_dir/acquire-meta"
+  for i in $(seq 1 100); do
+    [ ! -e "$case_dir/meta-held" ] || break
+    sleep 0.05
+  done
+  if [ ! -e "$case_dir/meta-held" ]; then
+    kill "$holder_pid" "$teardown_pid" 2>/dev/null || true
+    wait "$holder_pid" 2>/dev/null || true
+    wait "$teardown_pid" 2>/dev/null || true
+    fail "task-set-lock-order: spawn and teardown deadlocked on opposite task-set/meta lock order"
+  fi
+  : > "$case_dir/release-spawn-locks"
+  wait "$holder_pid" || fail "task-set-lock-order: spawn fixture failed while releasing locks"
+  wait "$teardown_pid"
+  status=$(cat "$case_dir/teardown.status")
+  [ "$status" -eq 0 ] || fail "task-set-lock-order: teardown failed after the spawn released its locks: $(cat "$case_dir/stderr")"
+  [ "$(wc -l < "$case_dir/treehouse.log")" -eq 1 ] \
+    || fail "task-set-lock-order: teardown did not return the worktree exactly once"
+  pass "spawn and teardown acquire the task-set lock before task metadata"
+}
+
 test_marker_failure_reissue_before_rerun_preserves_new_tenant() {
   local case_dir log closed rc spawn_pid rerun_pid i rerun_status
   case_dir=$(make_case marker-failure-reissue-race)
@@ -2954,6 +3009,7 @@ test_persistent_scan_refuses_after_bounded_retries
 test_process_exit_during_identity_lookup_does_not_refuse
 test_run_abort_precedes_process_reap_precedes_worktree_removal
 test_rerun_after_return_and_reissue_never_rereturns
+test_teardown_and_spawn_share_task_set_first_lock_order
 test_marker_failure_reissue_before_rerun_preserves_new_tenant
 test_first_run_still_returns_worktree
 test_rerun_still_bound_unreturned_returns

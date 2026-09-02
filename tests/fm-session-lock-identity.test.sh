@@ -392,6 +392,38 @@ test_e2e_acquire_records_the_binding_and_readmits_the_pool() {
   pass "session-lock identity e2e: acquire binds the session, readmits it from a reparented pool, and still refuses a foreign or inherited one"
 }
 
+test_e2e_existing_owned_lock_backfills_only_invalid_binding() {
+  local dir fakebin out session_pid expected
+  dir=$(new_home e2e-binding-backfill)
+  fakebin=$(fm_fakebin "$dir/bin")
+  spawn_live_pid; session_pid=$LIVE_PID
+  write_direct_ps "$fakebin" "$session_pid" "$session_pid"
+  printf '%s\n' "$session_pid" > "$dir/state/.lock"
+
+  out=$(lock_sh "$dir" "$fakebin" "$SESSION" "$session_pid") \
+    || fail "the legacy owned lock was refused during binding backfill: $out"
+  grep -qx "pid=$session_pid" "$dir/state/.lock.session" \
+    || fail "the legacy owned lock did not backfill its pid binding"
+  grep -qx "session=$SESSION" "$dir/state/.lock.session" \
+    || fail "the legacy owned lock did not backfill its session identity"
+
+  printf 'pid=4242\nsession=%s\n' "$OTHER_SESSION" > "$dir/state/.lock.session"
+  out=$(lock_sh "$dir" "$fakebin" "$SESSION" "$session_pid") \
+    || fail "the owned lock with an invalid binding was refused: $out"
+  [ "$(cat "$dir/state/.lock.session")" = "$(printf 'pid=%s\nsession=%s' "$session_pid" "$SESSION")" ] \
+    || fail "the invalid binding was not replaced with the proved owner's identity"
+
+  expected=$(printf 'pid=%s\nsession=%s\nupgrade-field=preserve' "$session_pid" "$SESSION")
+  printf '%s\n' "$expected" > "$dir/state/.lock.session"
+  out=$(lock_sh "$dir" "$fakebin" "$SESSION" "$session_pid") \
+    || fail "the owned lock with a valid binding was refused: $out"
+  [ "$(cat "$dir/state/.lock.session")" = "$expected" ] \
+    || fail "an already-valid session binding was rewritten instead of preserved"
+
+  reap_live_pids
+  pass "session-lock identity e2e: legacy and invalid bindings backfill while valid bindings remain unchanged"
+}
+
 # --- hook membership when the exported pid is not the recorded owner ----------
 # The second, pid-shaped proof asks whether the pid the harness exports for this
 # event IS the pid the lock records. bin/fm-lock.sh deliberately records the
@@ -505,3 +537,4 @@ test_binding_is_replaced_not_inherited
 test_hook_is_readmitted_when_the_exported_pid_is_not_the_recorded_owner
 test_hook_binding_proof_refuses_every_unproven_shape
 test_e2e_acquire_records_the_binding_and_readmits_the_pool
+test_e2e_existing_owned_lock_backfills_only_invalid_binding

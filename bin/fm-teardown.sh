@@ -281,6 +281,12 @@ teardown_release_locks() {
   return "$status"
 }
 trap teardown_release_locks EXIT
+WORKTREE_TRANSITION_LOCK=$(fm_task_set_lock_path "$STATE") || {
+  echo "error: could not resolve the worktree transition lock for $STATE" >&2
+  exit 1
+}
+fm_lock_acquire_wait "$WORKTREE_TRANSITION_LOCK" || exit 1
+WORKTREE_TRANSITION_LOCK_HELD=1
 fm_lock_try_acquire "$CONTROL_LOCK" || {
   echo "error: another lifecycle action is already running for task $ID; nothing was changed" >&2
   exit 1
@@ -2635,13 +2641,9 @@ resolve_worktree_ownership() {
 
 validate_pr_poll_cleanup "$STATE" "$ID" || exit 1
 
-if [ "$KIND" != secondmate ] && [ "$BACKEND" != orca ] && [ -n "$WT" ]; then
-  WORKTREE_TRANSITION_LOCK=$(fm_task_set_lock_path "$STATE") || {
-    echo "error: could not resolve the worktree transition lock for $STATE" >&2
-    exit 1
-  }
-  fm_lock_acquire_wait "$WORKTREE_TRANSITION_LOCK" || exit 1
-  WORKTREE_TRANSITION_LOCK_HELD=1
+if [ "$KIND" = secondmate ] || [ "$BACKEND" = orca ] || [ -z "$WT" ]; then
+  fm_lock_release "$WORKTREE_TRANSITION_LOCK" || exit 1
+  WORKTREE_TRANSITION_LOCK_HELD=0
 fi
 resolve_worktree_ownership
 if [ "$WORKTREE_OWNED_BY_TASK" -ne 1 ] && [ "$WORKTREE_TRANSITION_LOCK_HELD" = 1 ]; then

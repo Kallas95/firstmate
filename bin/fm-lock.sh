@@ -60,10 +60,18 @@ release_claim_lock() {
 trap release_claim_lock EXIT
 trap 'exit 1' HUP INT TERM
 
+backfill_session_binding() {
+  local id
+  id=$(fm_harness_session_identity) || return 0
+  fm_session_lock_binding_names_session "$STATE" "$id" && return 0
+  fm_session_lock_publish_identity "$STATE" "$old" || true
+}
+
 if [ -f "$LOCK" ] && [ ! -L "$LOCK" ]; then
   old=$(cat "$LOCK" 2>/dev/null || true)
-  if [ "$old" = "$me" ]; then
-    echo "lock acquired: harness pid $me"
+  if fm_session_lock_owned_by_self "$STATE"; then
+    backfill_session_binding
+    echo "lock acquired: harness pid $old"
     exit 0
   fi
   # The same session presents a different ancestry through a reparented worker
@@ -99,6 +107,12 @@ if [ -e "$LOCK" ] || [ -L "$LOCK" ]; then
     echo "error: session lock is unreadable; operate read-only until resolved" >&2
     exit 1
   }
+  if fm_session_lock_owned_by_self "$STATE"; then
+    backfill_session_binding
+    release_claim_lock
+    echo "lock acquired: harness pid $old"
+    exit 0
+  fi
   if [ "$old" != "$me" ] && fm_session_lock_owned_by_session_identity "$STATE"; then
     release_claim_lock
     echo "lock acquired: harness pid $old"
