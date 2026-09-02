@@ -430,6 +430,11 @@ terminal_fail_open() {
     fm_lock_release "$OWNER_LOCK"
     return 2
   fi
+  if ! budget_clear_stall held; then
+    fm_lock_release "$BUDGET_LOCK"
+    fm_lock_release "$OWNER_LOCK"
+    return 1
+  fi
   if [ "$FAIL_OPEN_REASON" = failure ] \
     && ! (set -C; : > "$FAILURE_ALARM") 2>/dev/null; then
     fm_lock_release "$BUDGET_LOCK"
@@ -455,9 +460,12 @@ failure_episode_verified() {
 # A stop this guard lets through is progress, so the consecutive-block series
 # ends here. Only an uninterrupted run of blocked stops reaches the stall bound.
 budget_clear_stall() {
-  local session count epoch tmp status=0
+  local mode=${1:-acquire} session count epoch tmp status=0 acquired=0
   [ -f "$BUDGET_FILE" ] || return 0
-  fm_lock_try_acquire "$BUDGET_LOCK" || return 1
+  if [ "$mode" = acquire ]; then
+    fm_lock_try_acquire "$BUDGET_LOCK" || return 1
+    acquired=1
+  fi
   session=$(sed -n '1s/^session=//p' "$BUDGET_FILE" 2>/dev/null || true)
   count=$(sed -n '2s/^count=//p' "$BUDGET_FILE" 2>/dev/null || true)
   epoch=$(sed -n '3s/^epoch=//p' "$BUDGET_FILE" 2>/dev/null || true)
@@ -471,7 +479,9 @@ budget_clear_stall() {
     status=1
   fi
   rm -f "$tmp" 2>/dev/null || true
-  fm_lock_release "$BUDGET_LOCK" || status=1
+  if [ "$acquired" -eq 1 ]; then
+    fm_lock_release "$BUDGET_LOCK" || status=1
+  fi
   return "$status"
 }
 
@@ -501,7 +511,6 @@ budget_account_current_epoch block || block_stop
 terminal_fail_open
 terminal_status=$?
 if [ "$terminal_status" -eq 0 ]; then
-  budget_clear_stall || exit 2
   if [ "$FM_SUP_IN_FLIGHT" -gt 0 ]; then
     NEED_DESC="$FM_SUP_IN_FLIGHT task(s) in flight"
   elif [ "$FM_SUP_SOURCES" -gt 0 ]; then

@@ -141,6 +141,8 @@ test_escape_hatch_drops_explicitly_and_traceably() {
   assert_contains "$out" "DROPPING 1 local-only commit(s)" "the escape hatch dropped commits silently"
   assert_contains "$out" "$dropped_sha" "the escape hatch did not print the dropped commit's full SHA"
   assert_present "$HOME_DIR/state/$id.local-merge-drop" "the escape hatch left no trace record"
+  assert_grep "status=completed" "$HOME_DIR/state/$id.local-merge-drop" \
+    "the trace record does not mark the successful drop completed"
   assert_grep "dropped=$dropped_sha" "$HOME_DIR/state/$id.local-merge-drop" \
     "the trace record does not carry the dropped commit's recoverable SHA"
   [ "$(git -C "$PROJECT_DIR" rev-parse main)" = "$(git -C "$PROJECT_DIR" rev-parse "fm/$id")" ] \
@@ -296,6 +298,7 @@ if [ "\${1:-}" = -C ] && [ "\${2:-}" = "$PROJECT_DIR" ] \
     | "$real_git" -C "$PROJECT_DIR" -c user.name='Concurrent Test' \
       -c user.email='concurrent@example.invalid' commit-tree "\$tree" -p "$before") || exit 1
   "$real_git" -C "$PROJECT_DIR" update-ref refs/heads/main "\$concurrent" "$before" || exit 1
+  printf '%s\n' 'concurrent uncommitted edit' >> "$PROJECT_DIR/adoption.txt"
   printf '%s\n' "\$concurrent" > "$HOME_DIR/concurrent.sha"
   exit 0
 fi
@@ -312,12 +315,58 @@ SH
   [ "$(git -C "$PROJECT_DIR" rev-parse "$rescue_ref")" = "$before" ] \
     || fail "the pre-landing default tip lost its rescue ref"
   assert_grep 'local adoption that must survive' "$PROJECT_DIR/adoption.txt" \
-    "the synchronized checkout lost the concurrent tip's content"
+    "the checkout lost the concurrent tip's committed content"
+  assert_grep 'concurrent uncommitted edit' "$PROJECT_DIR/adoption.txt" \
+    "the compare-and-swap refusal destroyed concurrent uncommitted work"
   assert_absent "$PROJECT_DIR/worker.txt" "the refused landing still checked out the task branch"
-  [ -z "$(git -C "$PROJECT_DIR" status --porcelain)" ] \
-    || fail "the preserved concurrent tip left its checkout unsynchronized"
+  assert_grep 'status=pending' "$HOME_DIR/state/$id.local-merge-drop" \
+    "the refused drop did not retain its pending audit"
+  assert_grep 'status=failed' "$HOME_DIR/state/$id.local-merge-drop" \
+    "the refused drop did not mark its audit failed"
+  grep -q '^status=completed$' "$HOME_DIR/state/$id.local-merge-drop" \
+    && fail "the refused drop was recorded as completed"
+  grep -q '^dropped=' "$HOME_DIR/state/$id.local-merge-drop" \
+    && fail "the refused drop audit claims commits were dropped"
   assert_contains "$out" "advanced concurrently" "the compare-and-swap refusal did not explain the preserved tip"
   pass "the destructive landing preserves and synchronizes a concurrent default-branch advance"
+}
+
+test_escape_hatch_refuses_to_overwrite_concurrent_checkout_edit() {
+  local rec id out status before fakebin real_git
+  id='merge-local-sync-race-r10'
+  rec=$(make_case sync-race "$id")
+  read_case_record "$rec"
+  before=$(git -C "$PROJECT_DIR" rev-parse main)
+  fakebin="$HOME_DIR/fakebin"
+  real_git=$(command -v git)
+  mkdir -p "$fakebin"
+  cat > "$fakebin/git" <<SH
+#!/usr/bin/env bash
+if [ "\${1:-}" = -C ] && [ "\${2:-}" = "$PROJECT_DIR" ] \
+  && [ "\${3:-}" = update-ref ] && [ "\${4:-}" = refs/heads/main ]; then
+  "$real_git" "\$@" || exit \$?
+  printf '%s\n' 'concurrent checkout edit' >> "$PROJECT_DIR/adoption.txt"
+  exit 0
+fi
+exec "$real_git" "\$@"
+SH
+  chmod +x "$fakebin/git"
+
+  out=$(PATH="$fakebin:$PATH" run_merge --drop-local-commits "$id")
+  status=$?
+  [ "$status" -ne 0 ] || fail "checkout synchronization overwrote a concurrent edit"
+  [ "$(git -C "$PROJECT_DIR" rev-parse main)" = "$(git -C "$PROJECT_DIR" rev-parse "fm/$id")" ] \
+    || fail "the compare-and-swap branch landing did not complete before synchronization"
+  assert_grep 'concurrent checkout edit' "$PROJECT_DIR/adoption.txt" \
+    "safe checkout synchronization destroyed the concurrent edit"
+  assert_grep 'status=completed' "$HOME_DIR/state/$id.local-merge-drop" \
+    "the completed branch drop was not recorded"
+  assert_grep "dropped=$before" "$HOME_DIR/state/$id.local-merge-drop" \
+    "the completed branch drop did not record its rescued commit"
+  assert_grep 'status=sync-failed' "$HOME_DIR/state/$id.local-merge-drop" \
+    "the refused checkout synchronization was not recorded"
+  assert_contains "$out" "were left untouched" "the synchronization refusal did not explain concurrent-work preservation"
+  pass "the landed branch leaves concurrent checkout edits untouched when synchronization refuses"
 }
 
 test_clean_landing_fast_forwards
@@ -329,5 +378,6 @@ test_dropped_commits_outlive_an_aggressive_gc
 test_successive_drops_each_keep_their_own_rescue
 test_redropping_a_recovered_tip_reuses_its_own_rescue
 test_escape_hatch_preserves_concurrent_default_advance
+test_escape_hatch_refuses_to_overwrite_concurrent_checkout_edit
 
 echo "# all fm-merge-local tests passed"

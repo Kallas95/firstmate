@@ -1513,6 +1513,44 @@ test_hook_claude_mode_bounds_blocks_when_the_auto_arm_never_claims() {
   pass "fm-turnend-guard --claude: consecutive blocked episodes each retain one bounded alarm"
 }
 
+test_hook_claude_mode_alarm_commits_stall_reset_before_unlock() {
+  local dir fakebin real_mv out status
+  dir=$(make_primary_dir "$TMP_ROOT/hook-claude-alarm-lock-contention")
+  : > "$dir/state/task1.meta"
+  seed_claude_failure "$dir"
+  printf 'session=sess-claude-mode\ncount=4\nepoch=3\nstalled=2\n' > "$dir/state/.turnend-claude-blocks"
+  fakebin="$dir/fakebin"
+  real_mv=$(command -v mv)
+  mkdir -p "$fakebin"
+  cat > "$fakebin/mv" <<SH
+#!/usr/bin/env bash
+source_file=\${1:-}
+target=
+for arg in "\$@"; do target=\$arg; done
+if [ "\$target" = "\$FM_RACE_BUDGET" ] \
+  && grep -qx 'stalled=0' "\$source_file" 2>/dev/null \
+  && [ ! -d "\$FM_RACE_OWNER_LOCK" ]; then
+  exit 1
+fi
+exec "$real_mv" "\$@"
+SH
+  chmod +x "$fakebin/mv"
+
+  out=$(printf '{"stop_hook_active":true,"session_id":"sess-claude-mode"}' \
+    | PATH="$fakebin:$PATH" FM_RACE_OWNER_LOCK="$dir/state/.claude-autoarm.lock" \
+      FM_RACE_BUDGET="$dir/state/.turnend-claude-blocks" \
+      FM_CLAUDE_AUTOARM_SYNC_WAIT_MS=100 CLAUDECODE=1 FM_HOME="$dir" \
+      bash "$dir/bin/fm-turnend-guard.sh" --claude 2>&1); status=$?
+  expect_code 0 "$status" "the attended alarm must commit its stall reset inside the terminal lock boundary"
+  assert_contains "$out" 'FIRSTMATE SUPERVISION IS GENUINELY DOWN' \
+    "a post-unlock reset failure swallowed the committed attended alarm"
+  assert_present "$dir/state/.claude-autoarm-failure-alarmed" \
+    "the successful failure alarm did not retain its one-shot marker"
+  [ "$(budget_field "$dir" stalled)" = 0 ] \
+    || fail "the terminal decision did not clear stalled state before releasing its locks"
+  pass "fm-turnend-guard --claude: attended decisions clear stalled state before unlock"
+}
+
 test_hook_claude_mode_default_stall_alarm_precedes_hard_override() {
   local dir out status i
   dir=$(make_primary_dir "$TMP_ROOT/hook-claude-default-stall-bound")
@@ -2023,6 +2061,7 @@ test_hook_claude_mode_allows_on_open_generation_claim
 test_hook_claude_mode_blocks_on_stuck_generation_claim
 test_hook_claude_mode_terminal_fail_open_clears_abandoned_claim
 test_hook_claude_mode_bounds_blocks_when_the_auto_arm_never_claims
+test_hook_claude_mode_alarm_commits_stall_reset_before_unlock
 test_hook_claude_mode_default_stall_alarm_precedes_hard_override
 test_hook_claude_mode_clamps_unsafe_stall_override
 test_hook_claude_mode_terminal_recovery_clears_stall_series

@@ -144,41 +144,55 @@ if [ -n "$DROPPED" ]; then
     }
   fi
 
+  attempt="$(date -u '+%Y-%m-%dT%H:%M:%SZ').${BASHPID:-$$}"
   {
-    echo "# $(date -u '+%Y-%m-%dT%H:%M:%SZ') fm-merge-local.sh --drop-local-commits"
+    echo "# $attempt fm-merge-local.sh --drop-local-commits"
+    echo "attempt=$attempt"
+    echo "status=pending"
     echo "task=$ID"
     echo "project=$PROJ"
     echo "default=$DEFAULT"
     echo "branch=$BRANCH"
     echo "default_before=$before"
     echo "rescue_ref=$RESCUE_REF"
-    git -C "$PROJ" log --no-decorate --format='dropped=%H %s' "$BRANCH..$DEFAULT"
+    for sha in $DROPPED; do
+      git -C "$PROJ" log -1 --no-decorate --format='pending=%H %s' "$sha"
+    done
   } >> "$RECORD"
-
-  echo "DROPPING $(printf '%s\n' "$DROPPED" | wc -l | tr -d ' ') local-only commit(s) from $DEFAULT as explicitly authorized:"
-  git -C "$PROJ" log --no-decorate --format='  %H %s' "$BRANCH..$DEFAULT"
-  echo "recorded in $RECORD; rescue ref $RESCUE_REF now holds $DEFAULT's pre-reset tip, so those commits stay in $PROJ (not just in the reflog) and stay recoverable by full SHA"
-  echo "release this drop's commits for good with: git -C $PROJ update-ref -d $RESCUE_REF (other drops keep their own ref)"
 
   if ! git -C "$PROJ" update-ref "refs/heads/$DEFAULT" "$target" "$before"; then
     current=$(git -C "$PROJ" rev-parse "refs/heads/$DEFAULT")
-    git -C "$PROJ" read-tree --reset -u "$current" || true
-    echo "error: local $DEFAULT advanced concurrently from $before to $current; preserved the newer tip and refused to overwrite it" >&2
+    {
+      echo "attempt=$attempt"
+      echo "status=failed"
+      echo "default_current=$current"
+    } >> "$RECORD"
+    echo "error: local $DEFAULT advanced concurrently from $before to $current; preserved the newer tip and refused to overwrite it without touching the checkout" >&2
     exit 1
   fi
-  current=$(git -C "$PROJ" rev-parse "refs/heads/$DEFAULT")
-  git -C "$PROJ" read-tree --reset -u "$current" || {
-    echo "error: landed $BRANCH without overwriting $DEFAULT, but could not synchronize its checked-out worktree to $current" >&2
+  {
+    echo "attempt=$attempt"
+    echo "status=completed"
+    for sha in $DROPPED; do
+      git -C "$PROJ" log -1 --no-decorate --format='dropped=%H %s' "$sha"
+    done
+  } >> "$RECORD"
+  if ! git -C "$PROJ" read-tree -m -u "$before" "$target"; then
+    {
+      echo "attempt=$attempt"
+      echo "status=sync-failed"
+      echo "default_current=$(git -C "$PROJ" rev-parse "refs/heads/$DEFAULT")"
+    } >> "$RECORD"
+    echo "error: landed $BRANCH without overwriting $DEFAULT, but concurrent index or worktree changes prevented safe checkout synchronization and were left untouched" >&2
     exit 1
-  }
-  latest=$(git -C "$PROJ" rev-parse "refs/heads/$DEFAULT")
-  if [ "$latest" != "$current" ]; then
-    current=$latest
-    git -C "$PROJ" read-tree --reset -u "$current" || {
-      echo "error: local $DEFAULT advanced again to $current and was preserved, but its checked-out worktree could not be synchronized" >&2
-      exit 1
-    }
   fi
+
+  echo "DROPPING $(printf '%s\n' "$DROPPED" | wc -l | tr -d ' ') local-only commit(s) from $DEFAULT as explicitly authorized:"
+  for sha in $DROPPED; do
+    git -C "$PROJ" log -1 --no-decorate --format='  %H %s' "$sha"
+  done
+  echo "recorded in $RECORD; rescue ref $RESCUE_REF now holds $DEFAULT's pre-reset tip, so those commits stay in $PROJ (not just in the reflog) and stay recoverable by full SHA"
+  echo "release this drop's commits for good with: git -C $PROJ update-ref -d $RESCUE_REF (other drops keep their own ref)"
   after=$(git -C "$PROJ" rev-parse --short "refs/heads/$DEFAULT")
   echo "reset local $DEFAULT to $BRANCH ($(git -C "$PROJ" rev-parse --short "$before") -> $after) in $PROJ"
   exit 0
