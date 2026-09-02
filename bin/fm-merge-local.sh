@@ -125,6 +125,7 @@ if [ -n "$DROPPED" ]; then
   fi
 
   before=$(git -C "$PROJ" rev-parse "$DEFAULT")
+  target=$(git -C "$PROJ" rev-parse "$BRANCH")
   RECORD="$STATE/$ID.local-merge-drop"
   # Keyed by the rescued tip, so successive drops on one task never contend for
   # the same name and none can displace another's commits.
@@ -159,8 +160,26 @@ if [ -n "$DROPPED" ]; then
   echo "recorded in $RECORD; rescue ref $RESCUE_REF now holds $DEFAULT's pre-reset tip, so those commits stay in $PROJ (not just in the reflog) and stay recoverable by full SHA"
   echo "release this drop's commits for good with: git -C $PROJ update-ref -d $RESCUE_REF (other drops keep their own ref)"
 
-  git -C "$PROJ" reset --hard "$BRANCH" >/dev/null
-  after=$(git -C "$PROJ" rev-parse --short "$DEFAULT")
+  if ! git -C "$PROJ" update-ref "refs/heads/$DEFAULT" "$target" "$before"; then
+    current=$(git -C "$PROJ" rev-parse "refs/heads/$DEFAULT")
+    git -C "$PROJ" read-tree --reset -u "$current" || true
+    echo "error: local $DEFAULT advanced concurrently from $before to $current; preserved the newer tip and refused to overwrite it" >&2
+    exit 1
+  fi
+  current=$(git -C "$PROJ" rev-parse "refs/heads/$DEFAULT")
+  git -C "$PROJ" read-tree --reset -u "$current" || {
+    echo "error: landed $BRANCH without overwriting $DEFAULT, but could not synchronize its checked-out worktree to $current" >&2
+    exit 1
+  }
+  latest=$(git -C "$PROJ" rev-parse "refs/heads/$DEFAULT")
+  if [ "$latest" != "$current" ]; then
+    current=$latest
+    git -C "$PROJ" read-tree --reset -u "$current" || {
+      echo "error: local $DEFAULT advanced again to $current and was preserved, but its checked-out worktree could not be synchronized" >&2
+      exit 1
+    }
+  fi
+  after=$(git -C "$PROJ" rev-parse --short "refs/heads/$DEFAULT")
   echo "reset local $DEFAULT to $BRANCH ($(git -C "$PROJ" rev-parse --short "$before") -> $after) in $PROJ"
   exit 0
 fi

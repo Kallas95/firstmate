@@ -501,6 +501,7 @@ budget_account_current_epoch block || block_stop
 terminal_fail_open
 terminal_status=$?
 if [ "$terminal_status" -eq 0 ]; then
+  budget_clear_stall || exit 2
   if [ "$FM_SUP_IN_FLIGHT" -gt 0 ]; then
     NEED_DESC="$FM_SUP_IN_FLIGHT task(s) in flight"
   elif [ "$FM_SUP_SOURCES" -gt 0 ]; then

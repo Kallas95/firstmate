@@ -276,6 +276,50 @@ test_redropping_a_recovered_tip_reuses_its_own_rescue() {
   pass "re-dropping a tip a rescue ref already holds keeps that ref and says so"
 }
 
+test_escape_hatch_preserves_concurrent_default_advance() {
+  local rec id out status before rescue_ref fakebin real_git concurrent
+  id='merge-local-concurrent-r9'
+  rec=$(make_case concurrent "$id")
+  read_case_record "$rec"
+  before=$(git -C "$PROJECT_DIR" rev-parse main)
+  rescue_ref="refs/fm-dropped/$id/$(git -C "$PROJECT_DIR" rev-parse --short main)"
+  fakebin="$HOME_DIR/fakebin"
+  real_git=$(command -v git)
+  mkdir -p "$fakebin"
+  cat > "$fakebin/git" <<SH
+#!/usr/bin/env bash
+if [ "\${1:-}" = -C ] && [ "\${2:-}" = "$PROJECT_DIR" ] \
+  && [ "\${3:-}" = update-ref ] && [ "\${4:-}" = "$rescue_ref" ]; then
+  "$real_git" "\$@" || exit \$?
+  tree=\$("$real_git" -C "$PROJECT_DIR" rev-parse '$before^{tree}') || exit 1
+  concurrent=\$(printf '%s\n' 'concurrent main advance' \
+    | "$real_git" -C "$PROJECT_DIR" -c user.name='Concurrent Test' \
+      -c user.email='concurrent@example.invalid' commit-tree "\$tree" -p "$before") || exit 1
+  "$real_git" -C "$PROJECT_DIR" update-ref refs/heads/main "\$concurrent" "$before" || exit 1
+  printf '%s\n' "\$concurrent" > "$HOME_DIR/concurrent.sha"
+  exit 0
+fi
+exec "$real_git" "\$@"
+SH
+  chmod +x "$fakebin/git"
+
+  out=$(PATH="$fakebin:$PATH" run_merge --drop-local-commits "$id")
+  status=$?
+  [ "$status" -ne 0 ] || fail "a landing overwrote the concurrently advanced default branch"
+  concurrent=$(cat "$HOME_DIR/concurrent.sha")
+  [ "$(git -C "$PROJECT_DIR" rev-parse main)" = "$concurrent" ] \
+    || fail "the concurrent default-branch tip was not preserved"
+  [ "$(git -C "$PROJECT_DIR" rev-parse "$rescue_ref")" = "$before" ] \
+    || fail "the pre-landing default tip lost its rescue ref"
+  assert_grep 'local adoption that must survive' "$PROJECT_DIR/adoption.txt" \
+    "the synchronized checkout lost the concurrent tip's content"
+  assert_absent "$PROJECT_DIR/worker.txt" "the refused landing still checked out the task branch"
+  [ -z "$(git -C "$PROJECT_DIR" status --porcelain)" ] \
+    || fail "the preserved concurrent tip left its checkout unsynchronized"
+  assert_contains "$out" "advanced concurrently" "the compare-and-swap refusal did not explain the preserved tip"
+  pass "the destructive landing preserves and synchronizes a concurrent default-branch advance"
+}
+
 test_clean_landing_fast_forwards
 test_landing_that_drops_a_local_commit_is_refused
 test_reconciled_branch_lands_cleanly
@@ -284,5 +328,6 @@ test_escape_hatch_is_a_noop_on_a_clean_landing
 test_dropped_commits_outlive_an_aggressive_gc
 test_successive_drops_each_keep_their_own_rescue
 test_redropping_a_recovered_tip_reuses_its_own_rescue
+test_escape_hatch_preserves_concurrent_default_advance
 
 echo "# all fm-merge-local tests passed"

@@ -1495,17 +1495,22 @@ test_hook_claude_mode_bounds_blocks_when_the_auto_arm_never_claims() {
   # real wake of an auto-arm that comes back.
   assert_absent "$dir/state/.claude-autoarm-failure-alarmed" \
     "the stalled fail-open consumed the auto-arm's failure-episode marker"
+  [ "$(budget_field "$dir" stalled)" = 0 ] \
+    || fail "the attended alarm did not end its blocked-stop series"
 
-  # And it stays a bound, not a release: the next unhealthy stop blocks again,
-  # and the alarm does not repeat for the same run of blocks.
   for i in 1 2 3; do
     out=$(FM_CLAUDE_TURNEND_STALL_BUDGET=3 FM_CLAUDE_AUTOARM_SYNC_WAIT_MS=100 \
       run_hook_claude "$dir" true); status=$?
-    expect_code 2 "$status" "the turn boundary must keep refusing blind stops after its one alarm"
-    assert_contains "$out" "TURN WOULD END BLIND" "the post-alarm block lost the blind-turn banner"
-    assert_not_contains "$out" 'GENUINELY DOWN' "the stalled alarm repeated inside one run of blocks"
+    expect_code 2 "$status" "new episode block $i must refuse the blind turn end"
+    assert_contains "$out" "TURN WOULD END BLIND" "new episode block $i lost the blind-turn banner"
+    assert_not_contains "$out" 'GENUINELY DOWN' "the next episode alarmed before its own budget"
   done
-  pass "fm-turnend-guard --claude: consecutive blocks are bounded and alarm once even when the auto-arm never claims the home (incident regression)"
+  out=$(FM_CLAUDE_TURNEND_STALL_BUDGET=3 FM_CLAUDE_AUTOARM_SYNC_WAIT_MS=100 \
+    run_hook_claude "$dir" true); status=$?
+  expect_code 0 "$status" "the next uninterrupted episode must retain its own attended alarm"
+  assert_contains "$out" 'FIRSTMATE SUPERVISION IS GENUINELY DOWN' \
+    "the next episode never reached its attended alarm"
+  pass "fm-turnend-guard --claude: consecutive blocked episodes each retain one bounded alarm"
 }
 
 test_hook_claude_mode_default_stall_alarm_precedes_hard_override() {
@@ -1522,8 +1527,8 @@ test_hook_claude_mode_default_stall_alarm_precedes_hard_override() {
   out=$(FM_CLAUDE_AUTOARM_SYNC_WAIT_MS=100 run_hook_claude "$dir" true); status=$?
   expect_code 0 "$status" "the eighth Stop attempt must alarm rather than become an eighth blocked Stop"
   assert_contains "$out" 'FIRSTMATE SUPERVISION IS GENUINELY DOWN' "the pre-override attended alarm is missing"
-  [ "$(budget_field "$dir" stalled)" = 8 ] \
-    || fail "the default alarm did not occur on the eighth Stop attempt: $(budget_field "$dir" stalled)"
+  [ "$(budget_field "$dir" stalled)" = 0 ] \
+    || fail "the default attended alarm did not reset its completed series"
   pass "fm-turnend-guard --claude: the default attended alarm precedes Claude's eight-block override"
 }
 
@@ -1542,8 +1547,8 @@ test_hook_claude_mode_clamps_unsafe_stall_override() {
     run_hook_claude "$dir" true); status=$?
   expect_code 0 "$status" "an unsafe stall override must alarm before the hard override"
   assert_contains "$out" 'FIRSTMATE SUPERVISION IS GENUINELY DOWN' "the clamped override produced no attended alarm"
-  [ "$(budget_field "$dir" stalled)" = 8 ] \
-    || fail "the unsafe override was not clamped to seven blocked Stops: $(budget_field "$dir" stalled)"
+  [ "$(budget_field "$dir" stalled)" = 0 ] \
+    || fail "the clamped attended alarm did not reset its completed series"
   pass "fm-turnend-guard --claude: unsafe stall overrides clamp below Claude's hard limit"
 }
 
