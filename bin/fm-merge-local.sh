@@ -32,8 +32,11 @@
 # A ref never expires, so the commits stay in the project for as long as it does.
 # The ref is keyed by the rescued tip, not by the task, so a later drop on the
 # same task plants its own ref beside the earlier one instead of displacing it,
-# and the branch never moves when a ref cannot be planted. Each ref is released
-# on its own - `git update-ref -d refs/fm-dropped/<id>/<short-sha>` frees exactly
+# and the branch never moves when a ref cannot be planted. The branch move is a
+# compare-and-swap against the inspected default tip, so a concurrent newer tip
+# is preserved; checkout synchronization also refuses concurrent index or
+# worktree changes instead of overwriting them. Each ref is released on its own
+# - `git update-ref -d refs/fm-dropped/<id>/<short-sha>` frees exactly
 # that drop's commits and leaves every other rescue alone - which is the
 # deliberate counterpart of the guarantee: until then those commits stay in the
 # project. Being destructive, the whole escape hatch needs the captain's explicit

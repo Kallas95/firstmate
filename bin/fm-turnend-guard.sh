@@ -60,10 +60,12 @@
 #      the first fresh exhausted-failure epoch preserves the bounded progression,
 #      while later fresh failed epochs consume it instead of resetting it;
 #   3. only when neither materializes is the auto-arm genuinely absent: re-block
-#      with the repair banner, bounded to FM_CLAUDE_TURNEND_BLOCK_BUDGET
-#      (default 3) consecutive blocks per session - safely below Claude Code's
-#      hard 8-consecutive-block override - then allow one loud attended
-#      fail-open only for an already verified failure episode.
+#      with the repair banner, accounting distinct failed auto-arm epochs up to
+#      FM_CLAUDE_TURNEND_BLOCK_BUDGET (default 3), while the independent
+#      FM_CLAUDE_TURNEND_STALL_BUDGET (default and maximum 7) bounds the actual
+#      uninterrupted blocked Stops safely before Claude Code's hard
+#      8-consecutive-block override; then allow one loud attended fail-open for
+#      either a verified failure episode or the bounded stalled series.
 set -u
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"

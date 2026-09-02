@@ -2598,7 +2598,7 @@ fm_backend_herdr_send_key() {  # <target> <key>
 # Fetches --format ansi and strips locally instead of asking for text: on herdr
 # 0.8.0 a text-format `pane read --source recent` against an idle alt-screen
 # agent triggers the wheel-event history harvest (src/server/alt_screen_read.rs)
-# — the pane VISIBLY scrolls up for seconds and snaps back on every poll
+# - the pane VISIBLY scrolls up for seconds and snaps back on every poll
 # (herdrdev/herdr#2669, closed as dup of #2387). The ansi path skips the
 # harvest entirely and returns herdr's retained rows instantly, which matches
 # the pre-0.8.0 text behavior this capture was written against.

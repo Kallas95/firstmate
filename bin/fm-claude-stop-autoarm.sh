@@ -190,7 +190,7 @@ fi
 # --- stale session-lock recovery ---------------------------------------------
 # Delegate the claim to fm-lock.sh so its live-owner refusal and write semantics
 # remain the single acquisition owner, then re-verify current-session identity
-# before touching any auto-arm state. The re-check uses the same two-proof
+# before touching any auto-arm state. The re-check uses the same three-proof
 # predicate as the admission gate above on purpose: if fm-lock.sh ever elects a
 # different pid than it does today, this verification must not silently narrow
 # to ancestry alone.

@@ -78,11 +78,15 @@
 # example a refused focus-unsafe pane close) is rerun by design - but by then
 # the pool may have reissued the SAME slot to a newer task, so re-running any
 # worktree-scoped step would reset the worktree under the live tenant and kill
-# its session. Ownership is decided from two provable signals: the durable
-# state/<id>.worktree-returned marker, touched immediately after this task's
-# own successful return, and the current fleet bindings - another task's meta
-# recording the same worktree path proves the slot was reissued even when the
-# marker is lost. A binding whose task carries its own worktree-returned
+# its session. Ownership is decided from two provable signals: the best-effort
+# durable state/<id>.worktree-returned marker, published immediately after this
+# task's own successful return, and the current fleet bindings - another task's
+# meta recording the same worktree path proves the slot was reissued even when
+# the marker is lost. Teardown takes the shared task-set lock before its task
+# meta lock and holds it through return and marker publication; spawn takes the
+# same lock before publishing a new binding, so a failed marker write cannot
+# expose a return/reissue interval in which a rerun sees neither signal. A
+# binding whose task carries its own worktree-returned
 # marker is ignored: that task provably gave the slot back already, so its
 # meta records a past tenancy, not a live claim. When either signal shows the
 # worktree is no longer this task's, the safety inspection, run-abort,

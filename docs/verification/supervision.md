@@ -63,7 +63,8 @@ The third is recorded below.
 
 ### Session identity behind the fleet lock
 
-The fleet lock records which session acquired it, because process ancestry is not a stable session identity: Claude Code serves one session's hooks and tool calls from more than one worker pool, and a pool whose top process is reparented to init yields a contiguous harness run that never reaches the session's own lineage.
+The binding beside the fleet lock records which session acquired it when Claude exposes a corroborated identity, because process ancestry is not a stable session identity: Claude Code serves one session's hooks and tool calls from more than one worker pool, and a pool whose top process is reparented to init yields a contiguous harness run that never reaches the session's own lineage.
+A newly written lock publishes that binding best effort, while an existing lock with a missing or invalid binding is backfilled only under the acquisition lock after current ancestry re-proves ownership; an already-valid binding is preserved.
 Whether the harness supplies a usable identity at all is vendor behavior, so it was measured on 2026-08-15 against Claude Code 2.1.232 and 2.1.233 in a throwaway lab whose only `SessionStart` hook logged the delivered payload, the exported environment, and the full process ancestry.
 
 Six session opens were recorded, covering every source the run tier routes on.
@@ -96,7 +97,8 @@ The case "the `SessionStart` hook itself fires from a reparented pool" is NOT co
 Were `CLAUDE_PID` to name the session rather than the pool on such a path, corroboration would fail and the read-only refusal would stand.
 `CLAUDE_PID` remains load-bearing as corroboration either way, since a session identity inherited through the environment can otherwise be replayed by any process the session launched.
 
-`tests/fm-session-lock-identity.test.sh` pins the resulting logic portably with a deterministic process table, verified on 2026-08-15 under both GNU bash 3.2.57 on Darwin 25.6.0 and GNU bash 5.3.9 on aarch64 Alpine.
+`tests/fm-session-lock-identity.test.sh` pins the resulting logic portably with a deterministic process table, including the serialized legacy-binding backfill, valid-binding preservation, and concurrent-takeover refusal.
+The core process-table logic was verified on 2026-08-15 under both GNU bash 3.2.57 on Darwin 25.6.0 and GNU bash 5.3.9 on aarch64 Alpine.
 `tests/fm-sessionstart-hook-live-e2e.test.sh` refreshes only the session-open half of this record, the six-row table above: it reaches no reparented worker pool, so the tool-call row stays a hand-recorded measurement.
 Run it after every Claude Code upgrade before trusting those six rows.
 Its 2026-08-15 run against Claude Code 2.1.233 checked five real session opens and found a corroborated session identity on every one:
