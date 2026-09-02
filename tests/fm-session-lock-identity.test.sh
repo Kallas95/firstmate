@@ -449,47 +449,55 @@ test_e2e_existing_owned_lock_backfills_only_invalid_binding() {
 }
 
 test_e2e_backfill_reproves_after_claim_lock_wait() {
-  local dir fakebin old_pid new_pid holder_pid call_pid i status expected
-  dir=$(new_home e2e-binding-backfill-takeover)
-  fakebin=$(fm_fakebin "$dir/bin")
+  local fixture_dir fakebin old_pid new_pid holder_pid call_pid i status expected
+  local lock_file binding_file claim_lock claim_held release_claim call_out call_status
+  fixture_dir=$(new_home e2e-binding-backfill-takeover)
+  fakebin=$(fm_fakebin "$fixture_dir/bin")
+  lock_file="$fixture_dir/state/.lock"
+  binding_file="$fixture_dir/state/.lock.session"
+  claim_lock="$fixture_dir/state/.lock.acquire"
+  claim_held="$fixture_dir/claim-held"
+  release_claim="$fixture_dir/release-claim"
+  call_out="$fixture_dir/call.out"
+  call_status="$fixture_dir/call.status"
   spawn_live_pid; old_pid=$LIVE_PID
   spawn_live_pid; new_pid=$LIVE_PID
   write_two_session_ps "$fakebin" "$old_pid" "$new_pid"
-  printf '%s\n' "$old_pid" > "$dir/state/.lock"
+  printf '%s\n' "$old_pid" > "$lock_file"
 
   (
     . "$ROOT/bin/fm-wake-lib.sh"
-    fm_lock_acquire_wait "$dir/state/.lock.acquire" || exit 1
-    : > "$dir/claim-held"
-    while [ ! -e "$dir/release-claim" ]; do sleep 0.05; done
-    fm_lock_release "$dir/state/.lock.acquire"
+    fm_lock_acquire_wait "$claim_lock" || exit 1
+    : > "$claim_held"
+    while [ ! -e "$release_claim" ]; do sleep 0.05; done
+    fm_lock_release "$claim_lock"
   ) &
   holder_pid=$!
   for i in $(seq 1 100); do
-    [ ! -e "$dir/claim-held" ] || break
+    [ ! -e "$claim_held" ] || break
     sleep 0.05
   done
-  [ -e "$dir/claim-held" ] || fail "binding-backfill-takeover: claim fixture never acquired the lock"
+  [ -e "$claim_held" ] || fail "binding-backfill-takeover: claim fixture never acquired the lock"
 
   (
-    lock_sh "$dir" "$fakebin" "$SESSION" "$old_pid" > "$dir/call.out"
-    printf '%s\n' "$?" > "$dir/call.status"
+    lock_sh "$fixture_dir" "$fakebin" "$SESSION" "$old_pid" > "$call_out"
+    printf '%s\n' "$?" > "$call_status"
   ) &
   call_pid=$!
   sleep 0.3
   kill -0 "$call_pid" 2>/dev/null || fail "binding-backfill-takeover: backfill bypassed the claim lock"
 
-  printf '%s\n' "$new_pid" > "$dir/state/.lock"
+  printf '%s\n' "$new_pid" > "$lock_file"
   expected=$(printf 'pid=%s\nsession=%s' "$new_pid" "$OTHER_SESSION")
-  printf '%s\n' "$expected" > "$dir/state/.lock.session"
-  : > "$dir/release-claim"
+  printf '%s\n' "$expected" > "$binding_file"
+  : > "$release_claim"
   wait "$holder_pid" || fail "binding-backfill-takeover: claim fixture failed"
   wait "$call_pid"
-  status=$(cat "$dir/call.status")
+  status=$(cat "$call_status")
   [ "$status" -ne 0 ] || fail "binding-backfill-takeover: obsolete owner accepted the replacement lock"
-  [ "$(cat "$dir/state/.lock")" = "$new_pid" ] \
+  [ "$(cat "$lock_file")" = "$new_pid" ] \
     || fail "binding-backfill-takeover: obsolete owner replaced the new lock pid"
-  [ "$(cat "$dir/state/.lock.session")" = "$expected" ] \
+  [ "$(cat "$binding_file")" = "$expected" ] \
     || fail "binding-backfill-takeover: obsolete owner replaced the new session binding"
 
   reap_live_pids
