@@ -1,0 +1,21 @@
+$ First Claude Stop attempt with a deliberately unpublishable failure-alarm marker
+exit=2
+●━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+●  TURN WOULD END BLIND - SUPERVISION IS OFF
+●  1 task(s) in flight, but no live watcher holds this home lock (last beat: never).
+●  The Stop-owned auto-arm did not claim this home either, so recovery is NOT already under way.
+●  watcher supervision needs Stop-owned automatic recovery; inspect the hook registration and startup status before ending the turn.
+●━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+$ Persisted budget after the failed publication
+session=sess-claude-mode
+count=4
+epoch=3
+stalled=7
+$ Next Claude Stop attempt reaches the marker-independent bounded attended alarm
+exit=0
+{"systemMessage":"FIRSTMATE SUPERVISION IS GENUINELY DOWN: 1 task(s) in flight, and this turn boundary has now blocked 8 times in a row without the Stop-owned auto-arm ever claiming this home, so the automatic path is not running at all. Keep this session attended and diagnose the automatic Stop-hook and watcher startup before relying on unattended supervision."}
+$ Persisted budget after the attended alarm
+session=sess-claude-mode
+count=4
+epoch=3
+stalled=0
