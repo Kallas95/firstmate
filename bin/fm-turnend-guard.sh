@@ -350,12 +350,12 @@ autoarm_owns_recovery() {
 fail_open_episode() {
   FAIL_OPEN_REASON=
   [ ! -e "$STATE/.afk" ] || return 1
-  if [ "$COUNT" -gt "$BLOCK_BUDGET" ] && failure_episode_verified; then
-    FAIL_OPEN_REASON=failure
-    return 0
-  fi
   if [ "$STALLED" -eq $((STALL_BUDGET + 1)) ]; then
     FAIL_OPEN_REASON=stalled
+    return 0
+  fi
+  if [ "$COUNT" -gt "$BLOCK_BUDGET" ] && failure_episode_verified; then
+    FAIL_OPEN_REASON=failure
     return 0
   fi
   return 1
@@ -430,13 +430,14 @@ terminal_fail_open() {
     fm_lock_release "$OWNER_LOCK"
     return 2
   fi
-  if ! budget_clear_stall held; then
+  if ! budget_store_stall held 0; then
     fm_lock_release "$BUDGET_LOCK"
     fm_lock_release "$OWNER_LOCK"
     return 1
   fi
   if [ "$FAIL_OPEN_REASON" = failure ] \
     && ! (set -C; : > "$FAILURE_ALARM") 2>/dev/null; then
+    budget_store_stall held "$old_stalled" || true
     fm_lock_release "$BUDGET_LOCK"
     fm_lock_release "$OWNER_LOCK"
     return 1
@@ -459,8 +460,8 @@ failure_episode_verified() {
 
 # A stop this guard lets through is progress, so the consecutive-block series
 # ends here. Only an uninterrupted run of blocked stops reaches the stall bound.
-budget_clear_stall() {
-  local mode=${1:-acquire} session count epoch tmp status=0 acquired=0
+budget_store_stall() {
+  local mode=${1:-acquire} stalled=${2:-0} session count epoch tmp status=0 acquired=0
   [ -f "$BUDGET_FILE" ] || return 0
   if [ "$mode" = acquire ]; then
     fm_lock_try_acquire "$BUDGET_LOCK" || return 1
@@ -473,8 +474,8 @@ budget_clear_stall() {
     ''|*[!0-9]*) count=0 ;;
   esac
   tmp="$BUDGET_FILE.tmp.$$"
-  if ! printf 'session=%s\ncount=%s\nepoch=%s\nstalled=0\n' \
-      "$session" "$count" "$epoch" > "$tmp" 2>/dev/null \
+  if ! printf 'session=%s\ncount=%s\nepoch=%s\nstalled=%s\n' \
+      "$session" "$count" "$epoch" "$stalled" > "$tmp" 2>/dev/null \
     || ! mv -f "$tmp" "$BUDGET_FILE" 2>/dev/null; then
     status=1
   fi
@@ -491,7 +492,7 @@ while [ "$i" -lt $((SYNC_WAIT_MS / 100)) ]; do
     if fm_watcher_healthy "$STATE" "$WATCH" "$GRACE" "$FM_HOME"; then
       fm_failure_episode_reset "$STATE" || exit 2
     fi
-    budget_clear_stall || exit 2
+    budget_store_stall || exit 2
     exit 0
   fi
   sleep 0.1
@@ -501,7 +502,7 @@ if autoarm_owns_recovery; then
   if fm_watcher_healthy "$STATE" "$WATCH" "$GRACE" "$FM_HOME"; then
     fm_failure_episode_reset "$STATE" || exit 2
   fi
-  budget_clear_stall || exit 2
+  budget_store_stall || exit 2
   exit 0
 fi
 
@@ -527,7 +528,7 @@ if [ "$terminal_status" -eq 0 ]; then
   exit 0
 fi
 if [ "$terminal_status" -eq 2 ]; then
-  budget_clear_stall || exit 2
+  budget_store_stall || exit 2
   exit 0
 fi
 block_stop

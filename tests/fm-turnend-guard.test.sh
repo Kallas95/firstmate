@@ -1513,6 +1513,32 @@ test_hook_claude_mode_bounds_blocks_when_the_auto_arm_never_claims() {
   pass "fm-turnend-guard --claude: consecutive blocked episodes each retain one bounded alarm"
 }
 
+test_hook_claude_mode_marker_failure_preserves_stall_fallback() {
+  local dir out status
+  dir=$(make_primary_dir "$TMP_ROOT/hook-claude-alarm-marker-failure")
+  : > "$dir/state/task1.meta"
+  seed_claude_failure "$dir"
+  printf 'session=sess-claude-mode\ncount=4\nepoch=3\nstalled=6\n' > "$dir/state/.turnend-claude-blocks"
+  ln -s "$dir/missing/alarm" "$dir/state/.claude-autoarm-failure-alarmed"
+
+  out=$(FM_CLAUDE_AUTOARM_SYNC_WAIT_MS=100 run_hook_claude "$dir" true); status=$?
+  expect_code 2 "$status" "failed failure-alarm publication must keep blocking"
+  assert_not_contains "$out" 'FIRSTMATE SUPERVISION IS GENUINELY DOWN' \
+    "failed marker publication reported an alarm it did not commit"
+  [ "$(budget_field "$dir" stalled)" = 7 ] \
+    || fail "failed marker publication did not restore the pre-reset stall progression"
+
+  out=$(FM_CLAUDE_AUTOARM_SYNC_WAIT_MS=100 run_hook_claude "$dir" true); status=$?
+  expect_code 0 "$status" "the preserved series must reach its marker-independent stall alarm"
+  assert_contains "$out" 'FIRSTMATE SUPERVISION IS GENUINELY DOWN' \
+    "persistent marker failure prevented the bounded stall alarm"
+  assert_contains "$out" 'without the Stop-owned auto-arm ever claiming this home' \
+    "the fallback alarm did not identify the stalled automatic path"
+  [ "$(budget_field "$dir" stalled)" = 0 ] \
+    || fail "the successful fallback alarm did not reset its series"
+  pass "fm-turnend-guard --claude: marker failure preserves the bounded stall fallback"
+}
+
 test_hook_claude_mode_alarm_commits_stall_reset_before_unlock() {
   local dir fakebin real_mv out status
   dir=$(make_primary_dir "$TMP_ROOT/hook-claude-alarm-lock-contention")
@@ -2061,6 +2087,7 @@ test_hook_claude_mode_allows_on_open_generation_claim
 test_hook_claude_mode_blocks_on_stuck_generation_claim
 test_hook_claude_mode_terminal_fail_open_clears_abandoned_claim
 test_hook_claude_mode_bounds_blocks_when_the_auto_arm_never_claims
+test_hook_claude_mode_marker_failure_preserves_stall_fallback
 test_hook_claude_mode_alarm_commits_stall_reset_before_unlock
 test_hook_claude_mode_default_stall_alarm_precedes_hard_override
 test_hook_claude_mode_clamps_unsafe_stall_override
