@@ -34,8 +34,10 @@
 # same task plants its own ref beside the earlier one instead of displacing it,
 # and the branch never moves when a ref cannot be planted. The branch move is a
 # compare-and-swap against the inspected default tip, so a concurrent newer tip
-# is preserved; checkout synchronization also refuses concurrent index or
-# worktree changes instead of overwriting them. Each ref is released on its own
+# is preserved; a newly planted rescue is removed again when that compare-and-swap
+# refuses, while a rescue from an earlier completed drop remains intact. Checkout
+# synchronization also refuses concurrent index or worktree changes instead of
+# overwriting them. Each ref is released on its own
 # - `git update-ref -d refs/fm-dropped/<id>/<short-sha>` frees exactly
 # that drop's commits and leaves every other rescue alone - which is the
 # deliberate counterpart of the guarantee: until then those commits stay in the
@@ -137,6 +139,7 @@ if [ -n "$DROPPED" ]; then
   # Plant it BEFORE the reset, and never move the branch without it: it is the
   # only thing that keeps the dropped commits reachable once the reflog is
   # pruned. Creating it with an empty expected value makes clobbering impossible.
+  rescue_created=no
   held=$(git -C "$PROJ" rev-parse --verify --quiet "$RESCUE_REF^{commit}" || true)
   if [ "$held" = "$before" ]; then
     echo "note: rescue ref $RESCUE_REF already holds $before from an earlier drop; leaving it as it is"
@@ -145,6 +148,7 @@ if [ -n "$DROPPED" ]; then
       echo "error: could not plant rescue ref $RESCUE_REF at $before in $PROJ; refusing to drop commits with no way back. $DEFAULT is untouched." >&2
       exit 1
     }
+    rescue_created=yes
   fi
 
   attempt="$(date -u '+%Y-%m-%dT%H:%M:%SZ').${BASHPID:-$$}"
@@ -165,11 +169,23 @@ if [ -n "$DROPPED" ]; then
 
   if ! git -C "$PROJ" update-ref "refs/heads/$DEFAULT" "$target" "$before"; then
     current=$(git -C "$PROJ" rev-parse "refs/heads/$DEFAULT")
+    rescue_released=not-created
+    if [ "$rescue_created" = yes ]; then
+      if git -C "$PROJ" update-ref -d "$RESCUE_REF" "$before"; then
+        rescue_released=yes
+      else
+        rescue_released=failed
+      fi
+    fi
     {
       echo "attempt=$attempt"
       echo "status=failed"
       echo "default_current=$current"
+      echo "rescue_ref_released=$rescue_released"
     } >> "$RECORD"
+    if [ "$rescue_released" = failed ]; then
+      echo "warning: could not release newly planted rescue ref $RESCUE_REF; inspect it before cleanup" >&2
+    fi
     echo "error: local $DEFAULT advanced concurrently from $before to $current; preserved the newer tip and refused to overwrite it without touching the checkout" >&2
     exit 1
   fi

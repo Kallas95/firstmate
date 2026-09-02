@@ -312,8 +312,9 @@ SH
   concurrent=$(cat "$HOME_DIR/concurrent.sha")
   [ "$(git -C "$PROJECT_DIR" rev-parse main)" = "$concurrent" ] \
     || fail "the concurrent default-branch tip was not preserved"
-  [ "$(git -C "$PROJECT_DIR" rev-parse "$rescue_ref")" = "$before" ] \
-    || fail "the pre-landing default tip lost its rescue ref"
+  if git -C "$PROJECT_DIR" rev-parse --verify --quiet "$rescue_ref" >/dev/null; then
+    fail "the refused landing retained a rescue ref for history it never dropped"
+  fi
   assert_grep 'local adoption that must survive' "$PROJECT_DIR/adoption.txt" \
     "the checkout lost the concurrent tip's committed content"
   assert_grep 'concurrent uncommitted edit' "$PROJECT_DIR/adoption.txt" \
@@ -323,6 +324,8 @@ SH
     "the refused drop did not retain its pending audit"
   assert_grep 'status=failed' "$HOME_DIR/state/$id.local-merge-drop" \
     "the refused drop did not mark its audit failed"
+  assert_grep 'rescue_ref_released=yes' "$HOME_DIR/state/$id.local-merge-drop" \
+    "the refused drop did not record release of its newly planted rescue"
   grep -q '^status=completed$' "$HOME_DIR/state/$id.local-merge-drop" \
     && fail "the refused drop was recorded as completed"
   grep -q '^dropped=' "$HOME_DIR/state/$id.local-merge-drop" \
