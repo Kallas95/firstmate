@@ -22,7 +22,7 @@ The lock's own durable session binding is the third, and it is required because 
 A validated native Claude session-open event carries its payload through lock acquisition and the deferred startup authorization; when its shared worker ancestry cannot reach the exported session pid, acquisition records that live session pid rather than the shared pool host.
 That third proof keeps the payload-and-environment corroboration of the second and replaces its pid equality with the binding: the record beside the lock must name exactly the pid the lock holds, the session it names must be this delivering session, and both the delivered session pid and recorded owner must still be live harness processes.
 A foreign session therefore still carries its own id and stays out, and a valid event delivered by a reparented pool disables generic ancestry because that pool may be shared with the lock owner.
-A lock with no binding keeps the previous behavior outside a validated session-open event.
+A lock with no binding supplies no third ownership proof; [the authoritative fleet-lock durability contract](verification/supervision.md#session-identity-behind-the-fleet-lock) defines when acquisition may retain ancestry-only behavior and when successful binding publication is required.
 A numeric session-lock owner that fails the shared `fm_harness_pid_alive` predicate is reclaimed through `bin/fm-lock.sh` before auto-arm state changes, while a live owner, absent lock, or malformed lock keeps the competing hook inert.
 The stale-owner claim occurs only after the existing AFK and supervision-need gates pass.
 After each non-actionable arm close, the hook rechecks the identity-matched watcher lock and fresh beacon before retrying a bounded number of times.

@@ -320,8 +320,9 @@ fm_harness_corroborated_session_identity() {  # [Claude hook payload]
 }
 
 # Record, beside state dir $1's session lock, that lock pid $2 was acquired by
-# THIS process's session. Best effort by contract: every failure leaves the home
-# on the ancestry proof alone, which is exactly today's behavior.
+# THIS process's session. The low-level publisher leaves policy to its caller:
+# fm-lock requires success for a corroborated identity, while callers with no
+# usable identity retain ancestry-only behavior.
 #
 # The stale record is discarded BEFORE the new one is written, so a home whose
 # harness exposes no session identity is left with no binding at all rather than
