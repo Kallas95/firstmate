@@ -96,7 +96,8 @@ The first fresh exhausted-failure epoch preserves its handoff without consuming 
 When none of those proofs appears, it accounts distinct failed auto-arm epochs up to `FM_CLAUDE_TURNEND_BLOCK_BUDGET` (default 3) before the verified failure path may fail open.
 That budget is keyed on the auto-arm's epoch identity, so it bounds an auto-arm that RUNS but keeps failing, and it bounds nothing at all once the auto-arm stops writing entirely: the epoch never changes, the count never advances, and the guard re-blocks for as long as the fault lasts (2026-08-27: 172 consecutive blocked stops over five hours with the count frozen at 1 and no alarm ever reachable).
 `FM_CLAUDE_TURNEND_STALL_BUDGET` (default and maximum 7) therefore counts the blocked stops themselves, unkeyed, and the stop that passes it opens the same one attended alarm without requiring the verified failure episode below, because that evidence can only be produced by an auto-arm that runs. Larger overrides clamp to 7, so every supported path opens on the eighth Stop attempt, after seven actual blocks and before Claude's hard override after eight consecutive blocks.
-That episode is deduplicated by the counter alone and never writes the failure-alarm marker, because that marker also suppresses the auto-arm's exit-2 continuations until positive watcher recovery and would swallow the first genuine wake of an auto-arm that comes back.
+Eligibility remains monotonic at or above that threshold until the terminal decision resets the counter, so a concurrent increment or transient terminal-decision failure cannot strand the alarm beyond one exact value.
+That episode is deduplicated by the terminal counter reset alone and never writes the failure-alarm marker, because that marker also suppresses the auto-arm's exit-2 continuations until positive watcher recovery and would swallow the first genuine wake of an auto-arm that comes back.
 A stop this guard lets through ends that run, so only an uninterrupted series reaches the bound, and away mode is excluded from both because the away daemon owns supervision and nobody is attending the alarm.
 The counter reset is committed while the budget lock is already held; if the verified-failure alarm marker cannot be published, the prior stalled value is restored and the Stop remains blocked, so publication failure cannot restart or strand the bounded series.
 In Claude mode, positive watcher recovery clears the block budget, failure notice, and attended alarm together under the existing budget lock before either hook reports ordinary recovery.
@@ -104,8 +105,8 @@ The one loud attended fail-open is available when the auto-arm has recorded an e
 Its alarm names which of the two applied, so a completely inert automatic path is not reported as an exhausted one.
 Each epoch identity is accounted at most once under the budget lock.
 Whenever both coordination locks are needed, positive auto-arm recovery and the terminal check acquire the auto-arm owner lock before the budget lock.
-After that alarm, the Stop auto-arm suppresses further exit-2 continuations until positive watcher recovery, so the final fail-open remains reachable.
-The alarm cannot repeat during that failure episode, and a later unhealthy stop blocks again.
+After a verified-failure alarm, the Stop auto-arm suppresses further exit-2 continuations until positive watcher recovery, so the final fail-open remains reachable.
+That alarm cannot repeat during the verified-failure episode. A stalled alarm instead resets its counter as the terminal decision commits, so the next unhealthy stop blocks and only a new full consecutive series can alarm again.
 A positively verified healthy watcher clears the failure notice, alarm, and block budget for a future independent episode.
 A Claude failure notice describes the automatic mechanism as broken and does not direct a routine manual background arm.
 

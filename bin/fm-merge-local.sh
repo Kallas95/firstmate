@@ -1,6 +1,7 @@
 #!/usr/bin/env bash
-# Perform the approved local merge for a local-only ship task: fast-forward the
-# project's default branch to the crewmate's fm/<id> branch.
+# Perform the approved guarded landing for a local-only ship task: fast-forward
+# the project's default branch to the crewmate's fm/<id> branch, or use the
+# explicit rescue-backed drop path documented below.
 #
 # This is firstmate's merge gate-action (the captain's merge authority applied
 # locally instead of via a GitHub PR). It is the one sanctioned exception to hard
@@ -32,12 +33,18 @@
 # A ref never expires, so the commits stay in the project for as long as it does.
 # The ref is keyed by the rescued tip, not by the task, so a later drop on the
 # same task plants its own ref beside the earlier one instead of displacing it,
-# and the branch never moves when a ref cannot be planted. The branch move is a
-# compare-and-swap against the inspected default tip, so a concurrent newer tip
-# is preserved; a newly planted rescue is removed again when that compare-and-swap
-# refuses, while a rescue from an earlier completed drop remains intact. Checkout
-# synchronization also refuses concurrent index or worktree changes instead of
-# overwriting them. Each ref is released on its own
+# and the branch never moves when a ref cannot be planted. The pre-reset and
+# target OIDs are captured before the dropped set is computed, and those same
+# immutable OIDs drive the rescue, audit, output, and compare-and-swap, so moving
+# symbolic tips cannot make the evidence disagree with the landing. A concurrent
+# newer default tip is preserved; a newly planted rescue is removed again when
+# that compare-and-swap refuses, while a rescue from an earlier completed drop
+# remains intact. After a successful branch move, checkout synchronization runs
+# before completion is appended to the audit. If that append fails, the moved ref
+# and synchronized clean checkout remain in place while the pending audit and
+# rescue ref are retained for the actionable reconciliation printed by the script.
+# Checkout synchronization itself refuses concurrent index or worktree changes
+# instead of overwriting them. Each ref is released on its own
 # - `git update-ref -d refs/fm-dropped/<id>/<short-sha>` frees exactly
 # that drop's commits and leaves every other rescue alone - which is the
 # deliberate counterpart of the guarantee: until then those commits stay in the
