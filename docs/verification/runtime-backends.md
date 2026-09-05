@@ -581,6 +581,24 @@ The CLI matrix was checked directly:
 All destructive verification used `bin/fm-herdr-lab.sh` with a non-default `fm-lab-` name and a byte-identical default-session tripwire.
 No ambient `herdr server stop` command is a supported test operation.
 
+### Alternate-screen text capture
+
+Herdr 0.8.2 protocol 20 was checked on 2026-09-05 with Pi 0.84.4 idle in its alternate-screen TUI inside a guarded non-default lab session.
+The probe captured the visible pane in ANSI before and after each of twelve calls to the ordinary text path at five-second intervals, while also reading pane scroll state and native agent identity:
+
+```sh
+"$HERDR_LAB_HELPER" run "$LAB" pane read "$PANE" --source recent --lines 200 --format text
+"$HERDR_LAB_HELPER" run "$LAB" pane get "$PANE"
+"$HERDR_LAB_HELPER" run "$LAB" pane read "$PANE" --source visible --lines 200 --format ansi
+"$HERDR_LAB_HELPER" run "$LAB" agent get "$PANE"
+```
+
+Every text result had SHA-256 `aca2223b6e50dcadedca8d0a5c30c57e6c7bd558f0b048575cfc9921c9bf4da9`, and all fourteen paint snapshots had SHA-256 `80c5326b3d10b13a417a9d7ab961f740c120c521fcadd3a73f0a186afaaddd2b`.
+All fourteen pane observations remained `{"max_offset_from_bottom":0,"offset_from_bottom":0,"viewport_rows":39}`, and the before and after agent reads both remained `agent=pi`, `agent_status=idle`, and `interactive_ready=true` with the same terminal identity and revision.
+The text reads therefore harvested no visible history and caused no scroll or paint change on 0.8.2, while returning stable capture content and preserving a usable native agent read.
+The guarded teardown completed with the default-session tripwire intact.
+This supersedes the Herdr 0.8.0 text-capture incident for the currently supported installed release, so the adapter retains upstream's text path rather than carrying the local ANSI-plus-strip workaround.
+
 ### Submit confirmation
 
 Measured 2026-08-19 against Herdr 0.8.0 and Claude Code 2.1.236 in an isolated `fm-lab-` session.

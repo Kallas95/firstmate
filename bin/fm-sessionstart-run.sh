@@ -93,7 +93,7 @@ session_start_completed() {
   local lock_pid completion_pid
   [ -f "$STATE/.lock" ] && [ ! -L "$STATE/.lock" ] || return 1
   [ -f "$COMPLETION_FILE" ] && [ ! -L "$COMPLETION_FILE" ] || return 1
-  fm_session_lock_owned_by_self "$STATE" || return 1
+  fm_session_lock_owned_by_current_session "$STATE" || return 1
   lock_pid=$(cat "$STATE/.lock" 2>/dev/null) || return 1
   completion_pid=$(cat "$COMPLETION_FILE" 2>/dev/null) || return 1
   case "$lock_pid" in ''|*[!0-9]*) return 1 ;; esac
@@ -117,6 +117,16 @@ if [ -z "$SOURCE" ] && [ ! -t 0 ]; then
   # and repeat every startup sweep.
   if fm_hook_payload_is_foreign_host "$PAYLOAD"; then
     exit 0
+  fi
+  # Carry the delivered Claude identity to the lock acquisition and deferred
+  # startup authorization. A shared per-user worker pool can be reparented away
+  # from the session before either runs, so ancestry alone is not sufficient.
+  # Only a payload that matches this live Claude session is propagated; an
+  # inherited marker is cleared first so it cannot outlive the event that made it.
+  unset FM_SESSION_LOCK_HOOK_PAYLOAD
+  if fm_claude_hook_event_session "$PAYLOAD" >/dev/null 2>&1; then
+    FM_SESSION_LOCK_HOOK_PAYLOAD=$PAYLOAD
+    export FM_SESSION_LOCK_HOOK_PAYLOAD
   fi
   SOURCE=$(printf '%s' "$PAYLOAD" | awk '
     BEGIN { RS = "\"" }

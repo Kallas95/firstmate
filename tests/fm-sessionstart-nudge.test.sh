@@ -892,8 +892,8 @@ test_pi_large_sessionstart_digest_is_delivered_loudly() {
     "$ROOT/.pi/extensions/lib/fm-sessionstart-supervisor.mjs" "$fixture/.pi/extensions/lib/"
   cp "$ROOT/bin/fm-sessionstart-run.sh" "$ROOT/bin/fm-sessionstart-nudge.sh" \
     "$ROOT/bin/fm-primary-scope-lib.sh" "$ROOT/bin/fm-gate-refuse-lib.sh" \
-    "$ROOT/bin/fm-hook-host-lib.sh" \
-    "$ROOT/bin/fm-operational-input.sh" "$fixture/bin/"
+    "$ROOT/bin/fm-hook-host-lib.sh" "$ROOT/bin/fm-session-lock-lib.sh" \
+    "$ROOT/bin/fm-cursor-lib.sh" "$ROOT/bin/fm-operational-input.sh" "$fixture/bin/"
   cat > "$fixture/bin/fm-session-start.sh" <<'SH'
 #!/usr/bin/env bash
 printf 'PI_LARGE_DIGEST_PREFIX\n'
@@ -964,6 +964,60 @@ test_run_reads_source_from_the_hook_payload() {
   pass "run wrapper: the hook payload's source field drives routing with no explicit argument"
 }
 
+test_run_propagates_only_a_valid_delivered_claude_identity() {
+  local root="$TMP_ROOT/run-claude-identity" out invalid status=0 session_pid
+  make_primary "$root"
+  cp "$ROOT/bin/fm-sessionstart-run.sh" "$ROOT/bin/fm-primary-scope-lib.sh" \
+    "$ROOT/bin/fm-gate-refuse-lib.sh" "$ROOT/bin/fm-hook-host-lib.sh" \
+    "$ROOT/bin/fm-session-lock-lib.sh" "$ROOT/bin/fm-cursor-lib.sh" "$root/bin/"
+  cat > "$root/bin/fm-session-start.sh" <<'SH'
+#!/usr/bin/env bash
+printf '%s\n' "${FM_SESSION_LOCK_HOOK_PAYLOAD:-missing}"
+SH
+  cat > "$root/bin/ps" <<'SH'
+#!/usr/bin/env bash
+pid= field=
+while [ "$#" -gt 0 ]; do
+  case "$1" in
+    -p) pid=$2; shift 2 ;;
+    -o) field=$2; shift 2 ;;
+    *) shift ;;
+  esac
+done
+if [ "$pid" = "${FM_FAKE_CLAUDE_PID:?}" ]; then
+  case "$field" in
+    comm=) printf '%s\n' claude ;;
+    args=) printf '%s\n' 'claude --session-id delivered' ;;
+    ppid=) printf '%s\n' 1 ;;
+  esac
+else
+  /bin/ps -o "$field" -p "$pid"
+fi
+SH
+  chmod +x "$root/bin/"*
+  sleep 30 >/dev/null 2>&1 & session_pid=$!
+
+  out=$(printf '%s' '{"session_id":"delivered","hook_event_name":"SessionStart","source":"startup"}' \
+    | env -u FM_SESSION_LOCK_HOOK_PAYLOAD CLAUDE_CODE_SESSION_ID=delivered \
+      CLAUDE_PID="$session_pid" FM_FAKE_CLAUDE_PID="$session_pid" \
+      FM_ROOT_OVERRIDE="$root" FM_HOME="$root" PATH="$root/bin:$PATH" \
+      "$root/bin/fm-sessionstart-run.sh") || status=$?
+  invalid=$(printf '%s' '{"session_id":"foreign","hook_event_name":"SessionStart","source":"startup"}' \
+    | env FM_SESSION_LOCK_HOOK_PAYLOAD='{"session_id":"stale"}' CLAUDE_CODE_SESSION_ID=delivered \
+      CLAUDE_PID="$session_pid" FM_FAKE_CLAUDE_PID="$session_pid" \
+      FM_ROOT_OVERRIDE="$root" FM_HOME="$root" PATH="$root/bin:$PATH" \
+      "$root/bin/fm-sessionstart-run.sh") || status=$?
+  kill "$session_pid" 2>/dev/null || true
+  wait "$session_pid" 2>/dev/null || true
+
+  expect_code 0 "$status" "run wrapper Claude identity propagation"
+  [ "$out" = '{"session_id":"delivered","hook_event_name":"SessionStart","source":"startup"}' ] \
+    || fail "the validated delivered identity did not reach session start: $out"
+  [ "$invalid" = missing ] \
+    || fail "a mismatched delivered identity retained or reached session start: $invalid"
+  pass "run wrapper: only a validated delivered Claude identity reaches lock acquisition and deferred startup"
+}
+
 test_run_unknown_source_takes_the_helm() {
   local root="$TMP_ROOT/run-unknown" out status=0
   make_run_primary "$root"
@@ -1030,6 +1084,7 @@ test_run_clear_without_completion_finishes_startup
 test_run_clear_rejects_previous_owner_completion
 test_run_resume_delegates_to_the_nudge
 test_run_reads_source_from_the_hook_payload
+test_run_propagates_only_a_valid_delivered_claude_identity
 test_run_unknown_source_takes_the_helm
 test_run_gate_and_scope_are_silent
 test_run_reports_a_failed_session_start_as_digest_text

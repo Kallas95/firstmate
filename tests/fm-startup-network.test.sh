@@ -382,6 +382,54 @@ EOF
   pass "fm-startup-network: deferred invalid secondmate markers produce durable wakes"
 }
 
+# Claude may deliver SessionStart through a shared worker pool that has been
+# reparented away from the live session. The native payload plus its matching
+# live exported pid is the ancestry-independent proof used by lock acquisition;
+# startup's deferred owner check must consume the same proof or it silently
+# downgrades the owning session to read-only. A different delivered session must
+# still be refused even though it runs on the same machine.
+test_locked_start_honors_the_delivered_session_not_process_ancestry() {
+  local rec home root log payload owner_pid foreign_pid foreign_rec foreign_home foreign_root foreign_log
+  rec=$(new_world delivered-lock-owner)
+  IFS='|' read -r home root log <<EOF
+$rec
+EOF
+  sleep 60 >/dev/null 2>&1 & owner_pid=$!
+  sleep 60 >/dev/null 2>&1 & foreign_pid=$!
+  printf '%s\n' "$owner_pid" > "$home/state/.lock"
+  payload='{"session_id":"owner-session","hook_event_name":"SessionStart","source":"startup"}'
+
+  env CLAUDE_CODE_SESSION_ID=owner-session CLAUDE_PID="$owner_pid" \
+    FM_SESSION_LOCK_HOOK_PAYLOAD="$payload" FM_FAKE_HARNESS_PID="$owner_pid" \
+    FM_FAKE_BOOTSTRAP_LOG="$log" FM_HOME="$home" FM_ROOT_OVERRIDE="$root" \
+    PATH="$root/bin:$PATH" "$root/bin/fm-startup-network.sh" \
+    start --locked 1 --harvest-pid $$
+  run_stage "$home" "$root" wait 30 >/dev/null \
+    || fail "the delivered lock owner's deferred stage never published"
+  assert_grep 'network=only detect_only=0' "$log" \
+    "the delivered lock owner was downgraded because its process ancestry was detached"
+
+  foreign_rec=$(new_world delivered-foreign-owner)
+  IFS='|' read -r foreign_home foreign_root foreign_log <<EOF
+$foreign_rec
+EOF
+  printf '%s\n' "$owner_pid" > "$foreign_home/state/.lock"
+  payload='{"session_id":"foreign-session","hook_event_name":"SessionStart","source":"startup"}'
+  env CLAUDE_CODE_SESSION_ID=foreign-session CLAUDE_PID="$foreign_pid" \
+    FM_SESSION_LOCK_HOOK_PAYLOAD="$payload" FM_FAKE_HARNESS_PID="$foreign_pid" \
+    FM_FAKE_BOOTSTRAP_LOG="$foreign_log" FM_HOME="$foreign_home" \
+    FM_ROOT_OVERRIDE="$foreign_root" PATH="$foreign_root/bin:$PATH" \
+    "$foreign_root/bin/fm-startup-network.sh" start --locked 1 --harvest-pid $$
+  [ ! -e "$foreign_home/state/.startup-network.status" ] \
+    || fail "a foreign delivered session launched a deferred worker"
+  [ ! -s "$foreign_log" ] \
+    || fail "a foreign delivered session ran startup checks: $(cat "$foreign_log")"
+
+  kill "$owner_pid" "$foreign_pid" 2>/dev/null || true
+  wait "$owner_pid" "$foreign_pid" 2>/dev/null || true
+  pass "fm-startup-network: delivered session identity survives detached ancestry without admitting a foreign session"
+}
+
 # The worker outlives the command that launched it. If another session took the
 # lock meanwhile, running the mutating sweeps would sweep underneath that
 # session, so they are refused - and the refusal is reported, not silent.
@@ -767,6 +815,7 @@ test_a_report_publication_failure_is_failed_and_still_wakes
 test_a_successful_result_never_queues_a_wake
 test_an_actionable_successful_result_still_queues_a_wake
 test_deferred_invalid_secondmate_markers_queue_durable_findings
+test_locked_start_honors_the_delivered_session_not_process_ancestry
 test_mutating_sweeps_are_refused_when_the_lock_changed_hands
 test_the_stage_bound_is_reported_not_swallowed
 test_an_abandoned_run_reads_as_needing_a_rerun
