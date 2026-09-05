@@ -307,6 +307,18 @@ fm_harness_session_is_ours() {
   fm_harness_ancestry_contains "$claimed"
 }
 
+fm_harness_corroborated_session_identity() {  # [Claude hook payload]
+  local payload=${1-} id
+  id=$(fm_harness_session_identity) || return 1
+  if fm_harness_session_is_ours; then
+    printf '%s\n' "$id"
+    return 0
+  fi
+  [ -n "$payload" ] || return 1
+  [ "$(fm_claude_hook_event_session "$payload" 2>/dev/null || true)" = "$id" ] || return 1
+  printf '%s\n' "$id"
+}
+
 # Record, beside state dir $1's session lock, that lock pid $2 was acquired by
 # THIS process's session. Best effort by contract: every failure leaves the home
 # on the ancestry proof alone, which is exactly today's behavior.
@@ -319,14 +331,7 @@ fm_session_lock_publish_identity() {  # <state-dir> <lock-pid> [Claude hook payl
   local state=$1 pid=$2 payload=${3-} id path tmp
   path=$(fm_session_lock_identity_path "$state")
   command rm -f -- "$path" 2>/dev/null || return 1
-  id=$(fm_harness_session_identity) || return 0
-  # Never bind a lock to an identity this process only inherited. Ordinary
-  # callers require ancestry corroboration; a native Claude hook may instead
-  # use its matching event payload when a shared pool breaks that ancestry.
-  if ! fm_harness_session_is_ours; then
-    [ -n "$payload" ] || return 0
-    [ "$(fm_claude_hook_event_session "$payload" 2>/dev/null || true)" = "$id" ] || return 0
-  fi
+  id=$(fm_harness_corroborated_session_identity "$payload") || return 0
   tmp=$(mktemp "$state/.lock.session.XXXXXX" 2>/dev/null) || return 1
   if ! { printf 'pid=%s\nsession=%s\n' "$pid" "$id" > "$tmp"; } 2>/dev/null; then
     command rm -f -- "$tmp" 2>/dev/null

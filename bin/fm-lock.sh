@@ -68,11 +68,21 @@ release_claim_lock() {
 trap release_claim_lock EXIT
 trap 'exit 1' HUP INT TERM
 
+publish_session_binding() {
+  local pid=$1 id
+  id=$(fm_harness_corroborated_session_identity "$HOOK_PAYLOAD") || {
+    fm_session_lock_publish_identity "$STATE" "$pid" "$HOOK_PAYLOAD" || true
+    return 0
+  }
+  fm_session_lock_publish_identity "$STATE" "$pid" "$HOOK_PAYLOAD" \
+    && fm_session_lock_binding_names_session "$STATE" "$id"
+}
+
 backfill_session_binding() {
   local id
   id=$(fm_harness_session_identity) || return 0
   fm_session_lock_binding_names_session "$STATE" "$id" && return 0
-  fm_session_lock_publish_identity "$STATE" "$old" "$HOOK_PAYLOAD" || true
+  publish_session_binding "$old"
 }
 
 if ! fm_lock_try_acquire "$CLAIM_LOCK"; then
@@ -95,7 +105,10 @@ if [ -e "$LOCK" ] || [ -L "$LOCK" ]; then
     exit 1
   }
   if fm_session_lock_owned_by_current_session "$STATE"; then
-    backfill_session_binding
+    if ! backfill_session_binding; then
+      echo "error: cannot publish durable session lock binding; operate read-only until resolved" >&2
+      exit 1
+    fi
     release_claim_lock
     echo "lock acquired: harness pid $old"
     exit 0
@@ -124,8 +137,9 @@ if [ ! -f "$LOCK" ] || [ -L "$LOCK" ] || [ "$written" != "$me" ]; then
 fi
 # Bind the verified lock to this session's own identity, so this home stays
 # provable from a worker pool that cannot reach the session through ancestry.
-# A failure here is deliberately not fatal: the home simply keeps the
-# ancestry-only behavior it had before this binding existed.
-fm_session_lock_publish_identity "$STATE" "$me" "$HOOK_PAYLOAD" || true
+if ! publish_session_binding "$me"; then
+  echo "error: cannot publish durable session lock binding; operate read-only until resolved" >&2
+  exit 1
+fi
 release_claim_lock
 echo "lock acquired: harness pid $me"

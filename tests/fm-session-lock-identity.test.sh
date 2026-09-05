@@ -331,6 +331,21 @@ SH
   chmod +x "$1/ps"
 }
 
+write_failing_binding_mv() {  # <fakebin>
+  local real_mv
+  real_mv=$(command -v mv)
+  cat > "$1/mv" <<SH
+#!/usr/bin/env bash
+target=
+for arg in "\$@"; do target=\$arg; done
+if [ "\$target" = "\${FM_FAIL_BINDING_PATH:-}" ]; then
+  exit 1
+fi
+exec "$real_mv" "\$@"
+SH
+  chmod +x "$1/mv"
+}
+
 # The measured reparented pool, over real live pids:
 #   this process -> claude bg-spare <spare> -> claude bg-pty-host <host> -> init
 # and <session>, the lock owner, is live but unreachable from that chain.
@@ -362,6 +377,73 @@ case "\$pid:\$field" in
 esac
 SH
   chmod +x "$1/ps"
+}
+
+test_e2e_first_acquire_refuses_when_binding_publication_fails() {
+  local dir fakebin out status session_pid
+  dir=$(new_home e2e-first-binding-failure)
+  fakebin=$(fm_fakebin "$dir/bin")
+  spawn_live_pid; session_pid=$LIVE_PID
+  write_direct_ps "$fakebin" "$session_pid" "$session_pid"
+  write_failing_binding_mv "$fakebin"
+
+  out=$(FM_FAIL_BINDING_PATH="$dir/state/.lock.session" \
+    lock_sh "$dir" "$fakebin" "$SESSION" "$session_pid")
+  status=$?
+  [ "$status" -ne 0 ] || fail "first acquisition accepted a lock whose required binding was not published"
+  assert_contains "$out" "operate read-only" \
+    "first-acquisition binding failure did not report read-only operation"
+  [ "$(tr -d '[:space:]' < "$dir/state/.lock")" = "$session_pid" ] \
+    || fail "first-acquisition binding failure did not preserve the verified lock"
+  assert_absent "$dir/state/.lock.session" \
+    "first-acquisition binding failure left a binding it did not publish"
+
+  reap_live_pids
+  pass "session-lock identity e2e: first acquisition fails closed when durable binding publication fails"
+}
+
+test_e2e_existing_lock_backfill_refuses_when_publication_fails() {
+  local dir fakebin out status session_pid
+  dir=$(new_home e2e-backfill-binding-failure)
+  fakebin=$(fm_fakebin "$dir/bin")
+  spawn_live_pid; session_pid=$LIVE_PID
+  write_direct_ps "$fakebin" "$session_pid" "$session_pid"
+  write_failing_binding_mv "$fakebin"
+  printf '%s\n' "$session_pid" > "$dir/state/.lock"
+
+  out=$(FM_FAIL_BINDING_PATH="$dir/state/.lock.session" \
+    lock_sh "$dir" "$fakebin" "$SESSION" "$session_pid")
+  status=$?
+  [ "$status" -ne 0 ] || fail "existing lock accepted ownership after required binding backfill failed"
+  assert_contains "$out" "operate read-only" \
+    "backfill binding failure did not report read-only operation"
+  [ "$(tr -d '[:space:]' < "$dir/state/.lock")" = "$session_pid" ] \
+    || fail "backfill binding failure changed the existing lock owner"
+  assert_absent "$dir/state/.lock.session" \
+    "backfill binding failure left a binding it did not publish"
+
+  reap_live_pids
+  pass "session-lock identity e2e: existing-lock backfill fails closed when publication fails"
+}
+
+test_e2e_identityless_acquire_preserves_ancestry_only_success() {
+  local dir fakebin out session_pid
+  dir=$(new_home e2e-identityless-acquire)
+  fakebin=$(fm_fakebin "$dir/bin")
+  spawn_live_pid; session_pid=$LIVE_PID
+  write_direct_ps "$fakebin" "$session_pid" "$session_pid"
+  write_failing_binding_mv "$fakebin"
+
+  out=$(FM_FAIL_BINDING_PATH="$dir/state/.lock.session" \
+    lock_sh "$dir" "$fakebin" '' '') \
+    || fail "identity-less harness lost ancestry-only lock acquisition: $out"
+  [ "$(tr -d '[:space:]' < "$dir/state/.lock")" = "$session_pid" ] \
+    || fail "identity-less acquisition did not retain its ancestry owner"
+  assert_absent "$dir/state/.lock.session" \
+    "identity-less acquisition unexpectedly published a session binding"
+
+  reap_live_pids
+  pass "session-lock identity e2e: harnesses without usable identity retain ancestry-only acquisition"
 }
 
 test_e2e_first_acquire_from_reparented_pool_records_the_session() {
@@ -672,6 +754,9 @@ test_binding_is_replaced_not_inherited
 test_hook_is_readmitted_when_the_exported_pid_is_not_the_recorded_owner
 test_reparented_event_does_not_trust_a_shared_pool_ancestor
 test_hook_binding_proof_refuses_every_unproven_shape
+test_e2e_first_acquire_refuses_when_binding_publication_fails
+test_e2e_existing_lock_backfill_refuses_when_publication_fails
+test_e2e_identityless_acquire_preserves_ancestry_only_success
 test_e2e_first_acquire_from_reparented_pool_records_the_session
 test_e2e_acquire_records_the_binding_and_readmits_the_pool
 test_e2e_existing_owned_lock_backfills_only_invalid_binding
