@@ -369,9 +369,9 @@ autoarm_owns_recovery() {
 # Away mode is excluded from both, because the away daemon owns supervision and
 # nobody is attending the alarm.
 #
-# The stalled episode is deduplicated by the counter itself, on the single value
-# that ends the run, and NOT by the failure-alarm marker. That marker also tells
-# the auto-arm to stop creating exit-2 continuations until a watcher is verified
+# The stalled episode is deduplicated by resetting the counter when its terminal
+# decision ends the run, and NOT by the failure-alarm marker. That marker also
+# tells the auto-arm to stop creating exit-2 continuations until a watcher is verified
 # healthy again, which is right for a mechanism that ran and failed, and wrong
 # here: an auto-arm that comes back would have its very first genuine wake
 # swallowed. A series that resumes after a turn the guard let through is a new
@@ -379,7 +379,7 @@ autoarm_owns_recovery() {
 fail_open_episode() {
   FAIL_OPEN_REASON=
   [ ! -e "$STATE/.afk" ] || return 1
-  if [ "$STALLED" -eq $((STALL_BUDGET + 1)) ]; then
+  if [ "$STALLED" -ge $((STALL_BUDGET + 1)) ]; then
     FAIL_OPEN_REASON=stalled
     return 0
   fi
@@ -393,7 +393,9 @@ fail_open_episode() {
 terminal_fail_open() {
   local pid role old_session old_count old_stalled
   fail_open_episode || return 1
-  [ ! -e "$FAILURE_ALARM" ] || return 1
+  if [ "$FAIL_OPEN_REASON" = failure ] && [ -e "$FAILURE_ALARM" ]; then
+    return 1
+  fi
   # A live open generation claim is a concurrent recovery decision to step
   # aside for, exactly like the legacy live-owner case below.
   fm_autoarm_claim_open "$STATE" "$GRACE" && return 2
@@ -435,7 +437,12 @@ terminal_fail_open() {
   STALLED=$old_stalled
   role=$(fm_lock_role "$OWNER_LOCK" 2>/dev/null || true)
   if [ "$role" != terminal-check ] || [ "$old_session" != "$SESSION_ID" ] \
-    || ! fail_open_episode || [ -e "$FAILURE_ALARM" ]; then
+    || ! fail_open_episode; then
+    fm_lock_release "$BUDGET_LOCK"
+    fm_lock_release "$OWNER_LOCK"
+    return 1
+  fi
+  if [ "$FAIL_OPEN_REASON" = failure ] && [ -e "$FAILURE_ALARM" ]; then
     fm_lock_release "$BUDGET_LOCK"
     fm_lock_release "$OWNER_LOCK"
     return 1

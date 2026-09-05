@@ -1514,6 +1514,43 @@ test_hook_claude_mode_bounds_blocks_when_the_auto_arm_never_claims() {
   pass "fm-turnend-guard --claude: consecutive blocked episodes each retain one bounded alarm"
 }
 
+test_hook_claude_mode_overshot_stall_threshold_still_alarms() {
+  local dir out status
+  dir=$(make_primary_dir "$TMP_ROOT/hook-claude-stall-overshoot")
+  : > "$dir/state/task1.meta"
+  seed_frozen_ledger "$dir"
+  printf 'session=sess-claude-mode\ncount=1\nepoch=918\nstalled=4\n' > "$dir/state/.turnend-claude-blocks"
+
+  out=$(FM_CLAUDE_TURNEND_STALL_BUDGET=3 FM_CLAUDE_AUTOARM_SYNC_WAIT_MS=100 \
+    run_hook_claude "$dir" true); status=$?
+  expect_code 0 "$status" "an overshot stall threshold must remain eligible for its terminal alarm"
+  assert_contains "$out" 'FIRSTMATE SUPERVISION IS GENUINELY DOWN' \
+    "overshot stall progression became permanently unreachable"
+  [ "$(budget_field "$dir" stalled)" = 0 ] \
+    || fail "the overshot terminal alarm did not reset its completed series"
+  pass "fm-turnend-guard --claude: overshot stall progression remains eligible until reset"
+}
+
+test_hook_claude_mode_existing_failure_marker_does_not_block_stall_alarm() {
+  local dir out status
+  dir=$(make_primary_dir "$TMP_ROOT/hook-claude-stall-with-failure-marker")
+  : > "$dir/state/task1.meta"
+  seed_claude_failure "$dir"
+  : > "$dir/state/.claude-autoarm-failure-alarmed"
+  printf 'session=sess-claude-mode\ncount=4\nepoch=3\nstalled=3\n' > "$dir/state/.turnend-claude-blocks"
+
+  out=$(FM_CLAUDE_TURNEND_STALL_BUDGET=3 FM_CLAUDE_AUTOARM_SYNC_WAIT_MS=100 \
+    run_hook_claude "$dir" true); status=$?
+  expect_code 0 "$status" "a prior failure marker must not suppress the independent stall alarm"
+  assert_contains "$out" 'without the Stop-owned auto-arm ever claiming this home' \
+    "the marker-independent stall alarm did not identify its stalled proof"
+  assert_present "$dir/state/.claude-autoarm-failure-alarmed" \
+    "the stall alarm unexpectedly consumed the verified-failure marker"
+  [ "$(budget_field "$dir" stalled)" = 0 ] \
+    || fail "the marker-independent stall alarm did not reset its completed series"
+  pass "fm-turnend-guard --claude: failure markers gate only verified-failure alarms"
+}
+
 test_hook_claude_mode_marker_failure_preserves_stall_fallback() {
   local dir out status
   dir=$(make_primary_dir "$TMP_ROOT/hook-claude-alarm-marker-failure")
@@ -2238,6 +2275,8 @@ test_hook_claude_mode_allows_on_open_generation_claim
 test_hook_claude_mode_blocks_on_stuck_generation_claim
 test_hook_claude_mode_terminal_fail_open_clears_abandoned_claim
 test_hook_claude_mode_bounds_blocks_when_the_auto_arm_never_claims
+test_hook_claude_mode_overshot_stall_threshold_still_alarms
+test_hook_claude_mode_existing_failure_marker_does_not_block_stall_alarm
 test_hook_claude_mode_marker_failure_preserves_stall_fallback
 test_hook_claude_mode_alarm_commits_stall_reset_before_unlock
 test_hook_claude_mode_default_stall_alarm_precedes_hard_override

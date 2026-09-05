@@ -334,9 +334,61 @@ SH
   pass "the destructive landing preserves and synchronizes a concurrent default-branch advance"
 }
 
+test_escape_hatch_audits_immutable_tips_during_concurrent_advance() {
+  local rec id out status before target fakebin real_git concurrent rescue_ref
+  id='merge-local-audit-race-r10'
+  rec=$(make_case audit-race "$id")
+  read_case_record "$rec"
+  before=$(git -C "$PROJECT_DIR" rev-parse main)
+  target=$(git -C "$PROJECT_DIR" rev-parse "fm/$id")
+  rescue_ref="refs/fm-dropped/$id/$(git -C "$PROJECT_DIR" rev-parse --short "$before")"
+  fakebin="$HOME_DIR/fakebin"
+  real_git=$(command -v git)
+  mkdir -p "$fakebin"
+  cat > "$fakebin/git" <<SH
+#!/usr/bin/env bash
+if [ "\${1:-}" = -C ] && [ "\${2:-}" = "$PROJECT_DIR" ] \
+  && [ "\${3:-}" = rev-list ] && [ ! -e "$HOME_DIR/rev-list-raced" ]; then
+  output=\$("$real_git" "\$@") || exit \$?
+  : > "$HOME_DIR/rev-list-raced"
+  tree=\$("$real_git" -C "$PROJECT_DIR" rev-parse '$before^{tree}') || exit 1
+  concurrent=\$(printf '%s\n' 'concurrent main advance during audit' \
+    | "$real_git" -C "$PROJECT_DIR" -c user.name='Concurrent Test' \
+      -c user.email='concurrent@example.invalid' commit-tree "\$tree" -p "$before") || exit 1
+  "$real_git" -C "$PROJECT_DIR" update-ref refs/heads/main "\$concurrent" "$before" || exit 1
+  printf '%s\n' "\$concurrent" > "$HOME_DIR/concurrent-audit.sha"
+  printf '%s\n' "\$output"
+  exit 0
+fi
+exec "$real_git" "\$@"
+SH
+  chmod +x "$fakebin/git"
+
+  out=$(PATH="$fakebin:$PATH" run_merge --drop-local-commits "$id")
+  status=$?
+  [ "$status" -ne 0 ] || fail "a landing used post-audit moving tips and dropped an unaudited concurrent commit"
+  concurrent=$(cat "$HOME_DIR/concurrent-audit.sha")
+  [ "$(git -C "$PROJECT_DIR" rev-parse main)" = "$concurrent" ] \
+    || fail "the immutable-tip compare-and-swap did not preserve the concurrent main advance"
+  [ "$(git -C "$PROJECT_DIR" rev-parse "fm/$id")" = "$target" ] \
+    || fail "the task target changed during the immutable-tip audit fixture"
+  assert_grep "default_before=$before" "$HOME_DIR/state/$id.local-merge-drop" \
+    "the durable audit did not retain the default tip it inspected"
+  assert_grep "target=$target" "$HOME_DIR/state/$id.local-merge-drop" \
+    "the durable audit did not retain the task tip it inspected"
+  grep -Eq "^(pending|dropped)=$concurrent " "$HOME_DIR/state/$id.local-merge-drop" \
+    && fail "the refused audit falsely recorded the concurrent commit as inspected or dropped"
+  if git -C "$PROJECT_DIR" rev-parse --verify --quiet "$rescue_ref" >/dev/null; then
+    fail "the refused immutable-tip landing retained its temporary rescue ref"
+  fi
+  assert_contains "$out" "advanced concurrently" \
+    "the immutable-tip compare-and-swap refusal did not explain the race"
+  pass "the destructive landing audits and compares the same immutable branch tips"
+}
+
 test_escape_hatch_refuses_to_overwrite_concurrent_checkout_edit() {
   local rec id out status before fakebin real_git
-  id='merge-local-sync-race-r10'
+  id='merge-local-sync-race-r11'
   rec=$(make_case sync-race "$id")
   read_case_record "$rec"
   before=$(git -C "$PROJECT_DIR" rev-parse main)
@@ -381,6 +433,7 @@ test_dropped_commits_outlive_an_aggressive_gc
 test_successive_drops_each_keep_their_own_rescue
 test_redropping_a_recovered_tip_reuses_its_own_rescue
 test_escape_hatch_preserves_concurrent_default_advance
+test_escape_hatch_audits_immutable_tips_during_concurrent_advance
 test_escape_hatch_refuses_to_overwrite_concurrent_checkout_edit
 
 echo "# all fm-merge-local tests passed"

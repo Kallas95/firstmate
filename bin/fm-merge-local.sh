@@ -114,13 +114,15 @@ fi
 # Commits on the local default branch that the task branch does not contain.
 # Empty means the merge is a clean fast-forward and nothing local is dropped;
 # non-empty is exactly the trap this guard exists for.
-DROPPED=$(git -C "$PROJ" rev-list "$BRANCH..$DEFAULT")
+before=$(git -C "$PROJ" rev-parse "refs/heads/$DEFAULT")
+target=$(git -C "$PROJ" rev-parse "refs/heads/$BRANCH")
+DROPPED=$(git -C "$PROJ" rev-list "$target..$before")
 
 if [ -n "$DROPPED" ]; then
   if [ "$DROP_LOCAL" != yes ]; then
     {
       echo "REFUSED: landing $BRANCH would drop $(printf '%s\n' "$DROPPED" | wc -l | tr -d ' ') commit(s) that exist only on local $DEFAULT:"
-      git -C "$PROJ" log --no-decorate --format='  %h %s' "$BRANCH..$DEFAULT"
+      git -C "$PROJ" log --no-decorate --format='  %h %s' "$target..$before"
       echo "$BRANCH was cut from origin/$DEFAULT, so it never contained them."
       echo "Reconcile first: run 'git merge $DEFAULT' inside $BRANCH (in its own worktree), resolve any conflicts, then retry this merge."
       echo "If dropping those commits is genuinely intended, re-run with --drop-local-commits (destructive; needs the captain's explicit word)."
@@ -128,8 +130,6 @@ if [ -n "$DROPPED" ]; then
     exit 1
   fi
 
-  before=$(git -C "$PROJ" rev-parse "$DEFAULT")
-  target=$(git -C "$PROJ" rev-parse "$BRANCH")
   RECORD="$STATE/$ID.local-merge-drop"
   # Keyed by the rescued tip, so successive drops on one task never contend for
   # the same name and none can displace another's commits.
@@ -159,6 +159,7 @@ if [ -n "$DROPPED" ]; then
     echo "project=$PROJ"
     echo "default=$DEFAULT"
     echo "branch=$BRANCH"
+    echo "target=$target"
     echo "default_before=$before"
     echo "rescue_ref=$RESCUE_REF"
     for sha in $DROPPED; do
@@ -211,8 +212,7 @@ if [ -n "$DROPPED" ]; then
   done
   echo "recorded in $RECORD; rescue ref $RESCUE_REF now holds $DEFAULT's pre-reset tip, so those commits stay in $PROJ (not just in the reflog) and stay recoverable by full SHA"
   echo "release this drop's commits for good with: git -C $PROJ update-ref -d $RESCUE_REF (other drops keep their own ref)"
-  after=$(git -C "$PROJ" rev-parse --short "refs/heads/$DEFAULT")
-  echo "reset local $DEFAULT to $BRANCH ($(git -C "$PROJ" rev-parse --short "$before") -> $after) in $PROJ"
+  echo "reset local $DEFAULT to $BRANCH ($(git -C "$PROJ" rev-parse --short "$before") -> $(git -C "$PROJ" rev-parse --short "$target")) in $PROJ"
   exit 0
 fi
 
