@@ -103,8 +103,8 @@
 # worktree process reap, branch delete, hook removal, and the return itself
 # are all skipped with one line, while tasktmp reaping, the pane close retry,
 # and durable-record cleanup continue unchanged.
-# The marker is removed with the rest of the volatile state once teardown
-# completes.
+# The marker remains durable through every task/backlog completion transition
+# and is removed only after that transition commits.
 # Usage: fm-teardown.sh <task-id> [--force]
 #   --force skips ordinary-task dirty and landed-work checks, skips scout report
 #   checks, and discards secondmate child work for kind=secondmate. Only use it
@@ -3065,7 +3065,6 @@ rm -f "$STATE/$ID.turn-ended" \
   "$STATE/$ID.pi-ext.ts" "$STATE/$ID.grok-turnend-token" \
   "$STATE/$ID.kimi-turnend-token" "$STATE/$ID.muse-session" \
   "$STATE/$ID.muse-session-current" "$STATE/$ID.cursor-session" \
-  "$STATE/$ID.worktree-returned" \
   "$STATE/$ID.control-relaunch" "$STATE/$ID.control-relaunch.meta-prior" \
   "$STATE/$ID.control-relaunch.brief-prior" "$STATE/$ID.control-relaunch.note" \
   "$STATE/$ID.reconcile-nudged" "$STATE/$ID.gemini-settings.json" \
@@ -3105,6 +3104,7 @@ else
     exit 1
   fi
 fi
+rm -f "$WORKTREE_RETURN_MARKER"
 fm_lock_release "$META_LOCK"
 META_LOCK_HELD=0
 if [ "$KIND" != scout ] && [ "$KIND" != secondmate ] && [ "$MODE" != local-only ]; then

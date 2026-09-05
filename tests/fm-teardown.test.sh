@@ -3284,6 +3284,58 @@ test_rerun_after_return_and_reissue_never_rereturns() {
   pass "a rerun after a completed return and a reissued slot closes the pane and cleans records without re-returning"
 }
 
+test_transition_failure_retains_return_marker_until_retry_commits() {
+  local case_dir rc real_rm fail_flag
+  case_dir=$(make_case return-marker-transition-failure)
+  write_meta "$case_dir" local-only ship
+  wt_commit "$case_dir" "landed work"
+  merge_wt_into_local_main "$case_dir"
+  add_logging_treehouse "$case_dir"
+  fail_flag="$case_dir/fail-meta-remove"
+  : > "$fail_flag"
+  real_rm=$(command -v rm)
+  cat > "$case_dir/fakebin/rm" <<SH
+#!/usr/bin/env bash
+for arg in "\$@"; do
+  if [ "\$arg" = "$case_dir/state/task-x1.meta" ] && [ -e "$fail_flag" ]; then
+    exit 1
+  fi
+done
+exec "$real_rm" "\$@"
+SH
+  chmod +x "$case_dir/fakebin/rm"
+
+  rc=0
+  run_teardown "$case_dir" > "$case_dir/stdout" 2> "$case_dir/stderr" || rc=$?
+  [ "$rc" -ne 0 ] || fail "return-marker-transition-failure: injected task-record transition failure reported success"
+  [ "$(wc -l < "$case_dir/treehouse.log")" -eq 1 ] \
+    || fail "return-marker-transition-failure: first attempt did not return the worktree exactly once"
+  assert_present "$case_dir/state/task-x1.worktree-returned" \
+    "return-marker-transition-failure: failed transition discarded the completed-return marker"
+  assert_present "$case_dir/state/task-x1.meta" \
+    "return-marker-transition-failure: failed transition unexpectedly removed the task record"
+
+  git -C "$case_dir/wt" checkout -q -b fm/task-x2
+  printf '%s\n' "reissued tenant work" > "$case_dir/wt/tenant.txt"
+  rm -f "$fail_flag"
+
+  run_teardown "$case_dir" > "$case_dir/stdout2" 2> "$case_dir/stderr2" \
+    || fail "return-marker-transition-failure: retry failed: $(cat "$case_dir/stderr2")"
+  [ "$(wc -l < "$case_dir/treehouse.log")" -eq 1 ] \
+    || fail "return-marker-transition-failure: retry returned the reissued slot again"
+  assert_grep "skipping worktree return" "$case_dir/stdout2" \
+    "return-marker-transition-failure: retry did not honor the durable return marker"
+  [ "$(git -C "$case_dir/wt" rev-parse --abbrev-ref HEAD)" = "fm/task-x2" ] \
+    || fail "return-marker-transition-failure: retry moved the reissued tenant branch"
+  assert_present "$case_dir/wt/tenant.txt" \
+    "return-marker-transition-failure: retry destroyed reissued tenant work"
+  assert_absent "$case_dir/state/task-x1.meta" \
+    "return-marker-transition-failure: retry did not commit task-record removal"
+  assert_absent "$case_dir/state/task-x1.worktree-returned" \
+    "return-marker-transition-failure: committed retry did not retire the return marker"
+  pass "a failed completion transition retains return ownership evidence through a safe retry"
+}
+
 test_teardown_and_spawn_share_task_set_first_lock_order() {
   local case_dir holder_pid teardown_pid i status
   case_dir=$(make_case task-set-lock-order)
@@ -3618,6 +3670,7 @@ test_persistent_scan_refuses_after_bounded_retries
 test_process_exit_during_identity_lookup_does_not_refuse
 test_run_abort_precedes_process_reap_precedes_worktree_removal
 test_rerun_after_return_and_reissue_never_rereturns
+test_transition_failure_retains_return_marker_until_retry_commits
 test_teardown_and_spawn_share_task_set_first_lock_order
 test_marker_failure_reissue_before_rerun_preserves_new_tenant
 test_first_run_still_returns_worktree
