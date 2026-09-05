@@ -380,34 +380,90 @@ SH
 }
 
 test_e2e_shared_pool_binding_admits_only_bound_session() {
-  local dir fakebin out status session_pid spare_pid host_pid expected
+  local dir claude host_script worker_script host_pid worker_pid binding_before
+  local out status i ancestry
   dir=$(new_home e2e-shared-pool-binding)
-  fakebin=$(fm_fakebin "$dir/bin")
-  spawn_live_pid; session_pid=$LIVE_PID
-  spawn_live_pid; spare_pid=$LIVE_PID
-  spawn_live_pid; host_pid=$LIVE_PID
-  write_live_pool_ps "$fakebin" "$session_pid" "$spare_pid" "$host_pid"
+  claude="$dir/claude"
+  host_script="$dir/pool-host.sh"
+  worker_script="$dir/pool-worker.sh"
+  binding_before="$dir/binding.before"
+  ln -s /bin/bash "$claude"
+  cat > "$host_script" <<'SH'
+#!/usr/bin/env bash
+printf '%s\n' "$$" > "$FM_POOL_DIR/host.pid"
+"$FM_POOL_CLAUDE" "$FM_POOL_WORKER" &
+wait "$!"
+SH
+  cat > "$worker_script" <<'SH'
+#!/usr/bin/env bash
+printf '%s\n' "$$" > "$FM_POOL_DIR/worker.pid"
+bash -c '. "$1"; fm_harness_ancestry_pids' _ \
+  "$FM_POOL_ROOT/bin/fm-session-lock-lib.sh" > "$FM_POOL_DIR/ancestry"
+printf 'ready\n' > "$FM_POOL_DIR/ready"
+for n in 1 2; do
+  while [ ! -f "$FM_POOL_DIR/request.$n" ]; do sleep 0.02; done
+  session=$(cat "$FM_POOL_DIR/request.$n")
+  CLAUDE_CODE_SESSION_ID="$session" CLAUDE_PID="$$" \
+    FM_HOME="$FM_POOL_DIR" FM_STATE_OVERRIDE="$FM_POOL_DIR/state" \
+    bash "$FM_POOL_ROOT/bin/fm-lock.sh" > "$FM_POOL_DIR/output.$n" 2>&1
+  printf '%s\n' "$?" > "$FM_POOL_DIR/status.$n"
+done
+SH
+  chmod +x "$host_script" "$worker_script"
+  FM_POOL_DIR="$dir" FM_POOL_CLAUDE="$claude" FM_POOL_WORKER="$worker_script" \
+    FM_POOL_ROOT="$ROOT" "$claude" "$host_script" &
+  host_pid=$!
+  E2E_PIDS="$E2E_PIDS $host_pid"
+  for i in $(seq 1 100); do
+    [ ! -e "$dir/ready" ] || break
+    sleep 0.05
+  done
+  [ -e "$dir/ready" ] || fail "the real shared-pool worker did not become ready"
+  [ "$(cat "$dir/host.pid")" = "$host_pid" ] \
+    || fail "the shared-pool host pid did not match its live process"
+  worker_pid=$(cat "$dir/worker.pid")
+  E2E_PIDS="$E2E_PIDS $worker_pid"
+  [ "$(ps -o ppid= -p "$worker_pid" | tr -d ' ')" = "$host_pid" ] \
+    || fail "the shared-pool worker was not a real child of its host"
+  ancestry=$(cat "$dir/ancestry")
+  [ "$(printf '%s\n' "$ancestry" | sed -n '1p')" = "$worker_pid" ] \
+    || fail "production ancestry discovery did not find the live shared-pool worker"
+  [ "$(printf '%s\n' "$ancestry" | tail -n 1)" = "$host_pid" ] \
+    || fail "production ancestry discovery did not reach the live shared-pool host"
+
   printf '%s\n' "$host_pid" > "$dir/state/.lock"
   bind_identity "$dir/state" "$host_pid" "$SESSION"
-  expected=$(cat "$dir/state/.lock.session")
+  cp "$dir/state/.lock.session" "$binding_before"
 
-  out=$(lock_sh "$dir" "$fakebin" "$SESSION" "$spare_pid") \
-    || fail "the session bound to the shared pool lock was refused: $out"
+  printf '%s\n' "$SESSION" > "$dir/request.1"
+  for i in $(seq 1 100); do
+    [ ! -e "$dir/status.1" ] || break
+    sleep 0.05
+  done
+  [ -e "$dir/status.1" ] || fail "the bound session check did not finish through the real pool"
+  out=$(cat "$dir/output.1")
+  expect_code 0 "$(cat "$dir/status.1")" "the session bound to the real shared pool lock was refused: $out"
   assert_contains "$out" "lock acquired: harness pid $host_pid" \
-    "the bound session did not retain the shared pool lock owner"
+    "the bound session did not retain the real shared-pool lock owner"
 
-  out=$(lock_sh "$dir" "$fakebin" "$OTHER_SESSION" "$spare_pid")
-  status=$?
-  [ "$status" -ne 0 ] || fail "a foreign session sharing the same pool ancestry acquired the bound lock"
+  printf '%s\n' "$OTHER_SESSION" > "$dir/request.2"
+  for i in $(seq 1 100); do
+    [ ! -e "$dir/status.2" ] || break
+    sleep 0.05
+  done
+  [ -e "$dir/status.2" ] || fail "the foreign session check did not finish through the real pool"
+  status=$(cat "$dir/status.2")
+  out=$(cat "$dir/output.2")
+  [ "$status" -ne 0 ] || fail "a foreign session sharing the same real pool ancestry acquired the bound lock"
   assert_contains "$out" "another live firstmate session holds the lock" \
-    "the foreign shared-pool session did not receive the read-only refusal"
-  [ "$(cat "$dir/state/.lock.session")" = "$expected" ] \
-    || fail "the foreign shared-pool session replaced the owner's durable binding"
+    "the foreign real-pool session did not receive the read-only refusal"
+  cmp -s "$dir/state/.lock.session" "$binding_before" \
+    || fail "the foreign real-pool session changed the owner's binding bytes"
   [ "$(tr -d '[:space:]' < "$dir/state/.lock")" = "$host_pid" ] \
-    || fail "the foreign shared-pool session changed the live lock owner"
+    || fail "the foreign real-pool session changed the live lock owner"
 
   reap_live_pids
-  pass "session-lock identity e2e: a shared pool admits only its durably bound session"
+  pass "session-lock identity e2e: a real shared pool admits only its durably bound session"
 }
 
 test_e2e_first_acquire_refuses_when_binding_publication_fails() {
