@@ -390,9 +390,18 @@ test_e2e_shared_pool_binding_admits_only_bound_session() {
   ln -s /bin/bash "$claude"
   cat > "$host_script" <<'SH'
 #!/usr/bin/env bash
+child=
+reap_child() {
+  [ -z "$child" ] || kill "$child" 2>/dev/null || true
+  [ -z "$child" ] || wait "$child" 2>/dev/null || true
+  child=
+}
+trap reap_child EXIT HUP INT TERM
 printf '%s\n' "$$" > "$FM_POOL_DIR/host.pid"
 "$FM_POOL_CLAUDE" "$FM_POOL_WORKER" &
-wait "$!"
+child=$!
+wait "$child"
+child=
 SH
   cat > "$worker_script" <<'SH'
 #!/usr/bin/env bash
@@ -413,7 +422,7 @@ SH
   FM_POOL_DIR="$dir" FM_POOL_CLAUDE="$claude" FM_POOL_WORKER="$worker_script" \
     FM_POOL_ROOT="$ROOT" "$claude" "$host_script" &
   host_pid=$!
-  E2E_PIDS="$E2E_PIDS $host_pid"
+  fm_test_register_pid "$host_pid" || fail "could not register the shared-pool host for cleanup"
   for i in $(seq 1 100); do
     [ ! -e "$dir/ready" ] || break
     sleep 0.05
@@ -422,7 +431,7 @@ SH
   [ "$(cat "$dir/host.pid")" = "$host_pid" ] \
     || fail "the shared-pool host pid did not match its live process"
   worker_pid=$(cat "$dir/worker.pid")
-  E2E_PIDS="$E2E_PIDS $worker_pid"
+  fm_test_register_pid "$worker_pid" || fail "could not register the shared-pool worker for cleanup"
   [ "$(ps -o ppid= -p "$worker_pid" | tr -d ' ')" = "$host_pid" ] \
     || fail "the shared-pool worker was not a real child of its host"
   ancestry=$(cat "$dir/ancestry")
@@ -462,7 +471,9 @@ SH
   [ "$(tr -d '[:space:]' < "$dir/state/.lock")" = "$host_pid" ] \
     || fail "the foreign real-pool session changed the live lock owner"
 
-  reap_live_pids
+  wait "$host_pid" || fail "the shared-pool host did not reap its worker cleanly"
+  fm_test_unregister_pid "$worker_pid"
+  fm_test_unregister_pid "$host_pid"
   pass "session-lock identity e2e: a real shared pool admits only its durably bound session"
 }
 

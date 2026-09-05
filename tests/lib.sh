@@ -70,6 +70,7 @@ pass() {
 # real caller, never a subshell.
 
 FM_TEST_CLEANUP_DIRS=()
+FM_TEST_CLEANUP_PIDS=()
 FM_TEST_CLEANUP_REGISTRY=$(mktemp "${TMPDIR:-/tmp}/.fm-test-cleanup.$$.XXXXXX") || return 1
 
 fm_test_pid_identity() {
@@ -83,8 +84,29 @@ FM_TEST_OWNER_IDENTITY=$(fm_test_pid_identity "$$") || {
   return 1
 }
 
+fm_test_register_pid() {
+  case "${1:-}" in
+    ''|*[!0-9]*) return 1 ;;
+  esac
+  FM_TEST_CLEANUP_PIDS+=("$1")
+}
+
+fm_test_unregister_pid() {
+  local wanted=$1 i
+  for i in "${!FM_TEST_CLEANUP_PIDS[@]}"; do
+    [ "${FM_TEST_CLEANUP_PIDS[$i]}" != "$wanted" ] || unset 'FM_TEST_CLEANUP_PIDS[$i]'
+  done
+}
+
 fm_test_cleanup() {
-  local d
+  local d pid
+  for pid in "${FM_TEST_CLEANUP_PIDS[@]:-}"; do
+    [ -n "$pid" ] && kill "$pid" 2>/dev/null || true
+  done
+  for pid in "${FM_TEST_CLEANUP_PIDS[@]:-}"; do
+    [ -n "$pid" ] && wait "$pid" 2>/dev/null || true
+  done
+  FM_TEST_CLEANUP_PIDS=()
   for d in "${FM_TEST_CLEANUP_DIRS[@]:-}"; do
     [ -n "$d" ] && rm -rf "$d"
   done

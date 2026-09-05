@@ -414,14 +414,60 @@ SH
     || fail "the compare-and-swap branch landing did not complete before synchronization"
   assert_grep 'concurrent checkout edit' "$PROJECT_DIR/adoption.txt" \
     "safe checkout synchronization destroyed the concurrent edit"
-  assert_grep 'status=completed' "$HOME_DIR/state/$id.local-merge-drop" \
-    "the completed branch drop was not recorded"
-  assert_grep "dropped=$before" "$HOME_DIR/state/$id.local-merge-drop" \
-    "the completed branch drop did not record its rescued commit"
+  assert_grep 'status=pending' "$HOME_DIR/state/$id.local-merge-drop" \
+    "the checkout synchronization failure lost its pending audit"
   assert_grep 'status=sync-failed' "$HOME_DIR/state/$id.local-merge-drop" \
     "the refused checkout synchronization was not recorded"
+  grep -q '^status=completed$' "$HOME_DIR/state/$id.local-merge-drop" \
+    && fail "the unsynchronized branch drop was recorded as completed"
+  grep -q '^dropped=' "$HOME_DIR/state/$id.local-merge-drop" \
+    && fail "the unsynchronized branch drop was recorded as dropped"
   assert_contains "$out" "were left untouched" "the synchronization refusal did not explain concurrent-work preservation"
   pass "the landed branch leaves concurrent checkout edits untouched when synchronization refuses"
+}
+
+test_escape_hatch_completion_audit_failure_keeps_checkout_synchronized() {
+  local rec id out status before target rescue_ref fakebin real_cat
+  id='merge-local-audit-write-r12'
+  rec=$(make_case audit-write "$id")
+  read_case_record "$rec"
+  before=$(git -C "$PROJECT_DIR" rev-parse main)
+  target=$(git -C "$PROJECT_DIR" rev-parse "fm/$id")
+  rescue_ref="refs/fm-dropped/$id/$(git -C "$PROJECT_DIR" rev-parse --short "$before")"
+  fakebin="$HOME_DIR/fakebin"
+  real_cat=$(command -v cat)
+  mkdir -p "$fakebin"
+  cat > "$fakebin/cat" <<SH
+#!/usr/bin/env bash
+case "\${1:-}" in
+  "$HOME_DIR/state/$id.local-merge-drop.completed."*) exit 1 ;;
+esac
+exec "$real_cat" "\$@"
+SH
+  chmod +x "$fakebin/cat"
+
+  out=$(PATH="$fakebin:$PATH" run_merge --drop-local-commits "$id")
+  status=$?
+  [ "$status" -ne 0 ] || fail "a failed completion-audit append reported successful landing"
+  [ "$(git -C "$PROJECT_DIR" rev-parse main)" = "$target" ] \
+    || fail "completion-audit failure lost the completed branch compare-and-swap"
+  [ -z "$(git -C "$PROJECT_DIR" status --porcelain)" ] \
+    || fail "completion-audit failure stranded an unsynchronized checkout"
+  assert_grep 'worker change' "$PROJECT_DIR/worker.txt" \
+    "completion-audit failure left the checkout at the dropped tip"
+  assert_absent "$PROJECT_DIR/adoption.txt" \
+    "completion-audit failure left dropped content in the synchronized checkout"
+  [ "$(git -C "$PROJECT_DIR" rev-parse "$rescue_ref")" = "$before" ] \
+    || fail "completion-audit failure lost the rescue ref for the dropped tip"
+  assert_grep 'status=pending' "$HOME_DIR/state/$id.local-merge-drop" \
+    "completion-audit failure lost its pending evidence"
+  grep -q '^status=completed$' "$HOME_DIR/state/$id.local-merge-drop" \
+    && fail "failed completion-audit append left a completed status"
+  assert_contains "$out" "synchronized its clean checkout" \
+    "completion-audit failure did not report the checkout state"
+  assert_contains "$out" "append status=completed" \
+    "completion-audit failure did not provide reconciliation guidance"
+  pass "completion-audit failure preserves the moved ref, synchronized checkout, and pending rescue evidence"
 }
 
 test_clean_landing_fast_forwards
@@ -435,5 +481,6 @@ test_redropping_a_recovered_tip_reuses_its_own_rescue
 test_escape_hatch_preserves_concurrent_default_advance
 test_escape_hatch_audits_immutable_tips_during_concurrent_advance
 test_escape_hatch_refuses_to_overwrite_concurrent_checkout_edit
+test_escape_hatch_completion_audit_failure_keeps_checkout_synchronized
 
 echo "# all fm-merge-local tests passed"

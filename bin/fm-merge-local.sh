@@ -189,13 +189,6 @@ if [ -n "$DROPPED" ]; then
     echo "error: local $DEFAULT advanced concurrently from $before to $current; preserved the newer tip and refused to overwrite it without touching the checkout" >&2
     exit 1
   fi
-  {
-    echo "attempt=$attempt"
-    echo "status=completed"
-    for sha in $DROPPED; do
-      git -C "$PROJ" log -1 --no-decorate --format='dropped=%H %s' "$sha"
-    done
-  } >> "$RECORD"
   if ! git -C "$PROJ" read-tree -m -u "$before" "$target"; then
     {
       echo "attempt=$attempt"
@@ -205,6 +198,19 @@ if [ -n "$DROPPED" ]; then
     echo "error: landed $BRANCH without overwriting $DEFAULT, but concurrent index or worktree changes prevented safe checkout synchronization and were left untouched" >&2
     exit 1
   fi
+  completion="$RECORD.completed.$$"
+  if ! {
+    echo "attempt=$attempt"
+    for sha in $DROPPED; do
+      git -C "$PROJ" log -1 --no-decorate --format='dropped=%H %s' "$sha"
+    done
+    echo "status=completed"
+  } > "$completion" || ! cat "$completion" >> "$RECORD"; then
+    rm -f "$completion" 2>/dev/null || true
+    echo "error: landed $BRANCH and synchronized its clean checkout, but could not append the completion audit to $RECORD. The pending audit and rescue ref $RESCUE_REF remain; verify refs/heads/$DEFAULT is $target, then append status=completed and the dropped SHAs before releasing the rescue ref." >&2
+    exit 1
+  fi
+  rm -f "$completion" 2>/dev/null || true
 
   echo "DROPPING $(printf '%s\n' "$DROPPED" | wc -l | tr -d ' ') local-only commit(s) from $DEFAULT as explicitly authorized:"
   for sha in $DROPPED; do
