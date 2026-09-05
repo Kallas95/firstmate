@@ -113,6 +113,10 @@ if [ -e "$LOCK" ] || [ -L "$LOCK" ]; then
     echo "lock acquired: harness pid $old"
     exit 0
   fi
+  if fm_session_lock_binding_conflicts_current_session "$STATE" "$HOOK_PAYLOAD"; then
+    echo "error: another live firstmate session holds the lock (pid $old); operate read-only until resolved" >&2
+    exit 1
+  fi
   if [ "$old" != "$me" ] && fm_session_lock_owned_by_session_identity "$STATE"; then
     release_claim_lock
     echo "lock acquired: harness pid $old"

@@ -361,9 +361,8 @@ fm_session_lock_publish_identity() {  # <state-dir> <lock-pid> [Claude hook payl
 #
 # Each caller supplies the CORROBORATION that the session it asks about is really
 # the one behind this run, because the environment string alone proves nothing.
-fm_session_lock_binding_names_session() {  # <state-dir> <session-id>
-  local state=$1 want=$2 lock_pid path recorded_pid recorded_session
-  [ -n "$want" ] || return 1
+fm_session_lock_bound_session() {  # <state-dir>
+  local state=$1 lock_pid path recorded_pid recorded_session
   lock_pid=$(cat "$state/.lock" 2>/dev/null || true)
   case "$lock_pid" in
     ''|*[!0-9]*) return 1 ;;
@@ -373,8 +372,25 @@ fm_session_lock_binding_names_session() {  # <state-dir> <session-id>
   recorded_pid=$(sed -n 's/^pid=//p' "$path" 2>/dev/null | sed -n '1p')
   recorded_session=$(sed -n 's/^session=//p' "$path" 2>/dev/null | sed -n '1p')
   [ "$recorded_pid" = "$lock_pid" ] || return 1
-  [ -n "$recorded_session" ] && [ "$recorded_session" = "$want" ] || return 1
+  case "$recorded_session" in
+    ''|*[!A-Za-z0-9._-]*) return 1 ;;
+  esac
   fm_harness_pid_alive "$lock_pid" || return 1
+  printf '%s\n' "$recorded_session"
+}
+
+fm_session_lock_binding_names_session() {  # <state-dir> <session-id>
+  local state=$1 want=$2 recorded_session
+  [ -n "$want" ] || return 1
+  recorded_session=$(fm_session_lock_bound_session "$state") || return 1
+  [ "$recorded_session" = "$want" ]
+}
+
+fm_session_lock_binding_conflicts_current_session() {  # <state-dir> [Claude hook payload]
+  local state=$1 payload=${2-} id recorded_session
+  id=$(fm_harness_corroborated_session_identity "$payload") || return 1
+  recorded_session=$(fm_session_lock_bound_session "$state") || return 1
+  [ "$recorded_session" != "$id" ]
 }
 
 # True when state dir $1's session lock was acquired by the very session this
@@ -448,9 +464,15 @@ fm_session_lock_owned_by_claude_hook_binding() {  # <state-dir> <payload>
 # valid event whose exported session pid is unreachable deliberately narrows
 # generic ancestry: that ancestry may be a pool shared with another session.
 fm_session_lock_owned_by_current_session() {  # <state-dir>
-  local state=$1 payload=${FM_SESSION_LOCK_HOOK_PAYLOAD:-}
+  local state=$1 payload=${FM_SESSION_LOCK_HOOK_PAYLOAD:-} id recorded_session
   if [ -n "$payload" ] && fm_claude_hook_event_session "$payload" >/dev/null 2>&1; then
     fm_session_lock_owned_by_this_claude_session "$state" "$payload"
+    return
+  fi
+  id=$(fm_harness_corroborated_session_identity 2>/dev/null || true)
+  recorded_session=$(fm_session_lock_bound_session "$state" 2>/dev/null || true)
+  if [ -n "$id" ] && [ -n "$recorded_session" ]; then
+    [ "$recorded_session" = "$id" ]
     return
   fi
   fm_session_lock_owned_by_self "$state" && return 0
@@ -478,9 +500,15 @@ fm_session_lock_owned_by_current_session() {  # <state-dir>
 FM_SESSION_LOCK_PROOF=''
 # shellcheck disable=SC2034 # FM_SESSION_LOCK_PROOF is a caller-read output.
 fm_session_lock_owned_by_this_claude_session() {  # <state-dir> <payload>
-  local state=$1 payload=${2-} event_session='' ancestry_allowed=1
+  local state=$1 payload=${2-} event_session='' recorded_session='' ancestry_allowed=1
   FM_SESSION_LOCK_PROOF=''
   event_session=$(fm_claude_hook_event_session "$payload" 2>/dev/null || true)
+  recorded_session=$(fm_session_lock_bound_session "$state" 2>/dev/null || true)
+  if [ -n "$event_session" ] && [ -n "$recorded_session" ]; then
+    [ "$recorded_session" = "$event_session" ] || return 1
+    FM_SESSION_LOCK_PROOF=claude-session-binding
+    return 0
+  fi
   # When a valid event came through a pool that cannot reach its exported
   # session pid, generic ancestry may name a worker shared with a foreign
   # session. In that shape only the exact pid or durable binding can decide.

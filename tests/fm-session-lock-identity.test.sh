@@ -379,6 +379,37 @@ SH
   chmod +x "$1/ps"
 }
 
+test_e2e_shared_pool_binding_admits_only_bound_session() {
+  local dir fakebin out status session_pid spare_pid host_pid expected
+  dir=$(new_home e2e-shared-pool-binding)
+  fakebin=$(fm_fakebin "$dir/bin")
+  spawn_live_pid; session_pid=$LIVE_PID
+  spawn_live_pid; spare_pid=$LIVE_PID
+  spawn_live_pid; host_pid=$LIVE_PID
+  write_live_pool_ps "$fakebin" "$session_pid" "$spare_pid" "$host_pid"
+  printf '%s\n' "$host_pid" > "$dir/state/.lock"
+  bind_identity "$dir/state" "$host_pid" "$SESSION"
+  expected=$(cat "$dir/state/.lock.session")
+
+  out=$(lock_sh "$dir" "$fakebin" "$SESSION" "$spare_pid") \
+    || fail "the session bound to the shared pool lock was refused: $out"
+  assert_contains "$out" "lock acquired: harness pid $host_pid" \
+    "the bound session did not retain the shared pool lock owner"
+
+  out=$(lock_sh "$dir" "$fakebin" "$OTHER_SESSION" "$spare_pid")
+  status=$?
+  [ "$status" -ne 0 ] || fail "a foreign session sharing the same pool ancestry acquired the bound lock"
+  assert_contains "$out" "another live firstmate session holds the lock" \
+    "the foreign shared-pool session did not receive the read-only refusal"
+  [ "$(cat "$dir/state/.lock.session")" = "$expected" ] \
+    || fail "the foreign shared-pool session replaced the owner's durable binding"
+  [ "$(tr -d '[:space:]' < "$dir/state/.lock")" = "$host_pid" ] \
+    || fail "the foreign shared-pool session changed the live lock owner"
+
+  reap_live_pids
+  pass "session-lock identity e2e: a shared pool admits only its durably bound session"
+}
+
 test_e2e_first_acquire_refuses_when_binding_publication_fails() {
   local dir fakebin out status session_pid
   dir=$(new_home e2e-first-binding-failure)
@@ -754,6 +785,7 @@ test_binding_is_replaced_not_inherited
 test_hook_is_readmitted_when_the_exported_pid_is_not_the_recorded_owner
 test_reparented_event_does_not_trust_a_shared_pool_ancestor
 test_hook_binding_proof_refuses_every_unproven_shape
+test_e2e_shared_pool_binding_admits_only_bound_session
 test_e2e_first_acquire_refuses_when_binding_publication_fails
 test_e2e_existing_lock_backfill_refuses_when_publication_fails
 test_e2e_identityless_acquire_preserves_ancestry_only_success
