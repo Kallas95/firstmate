@@ -1,0 +1,8 @@
+mode=bad-schema elapsed_seconds=0 output_bytes=772 reason_code=incompatible_source
+{"schema":"fm-project-status.v1","match":{"status":"unavailable","project":null,"candidates":[]},"current":{"state":"unavailable","reason_code":"incompatible_source","reason_ids":[]},"underway":[]}
+mode=oversized elapsed_seconds=1 output_bytes=756 reason_code=source_too_large
+{"schema":"fm-project-status.v1","match":{"status":"unavailable","project":null,"candidates":[]},"current":{"state":"unavailable","reason_code":"source_too_large","reason_ids":[]},"underway":[]}
+mode=failure elapsed_seconds=0 output_bytes=743 reason_code=source_unreadable
+{"schema":"fm-project-status.v1","match":{"status":"unavailable","project":null,"candidates":[]},"current":{"state":"unavailable","reason_code":"source_unreadable","reason_ids":[]},"underway":[]}
+mode=timeout elapsed_seconds=8 output_bytes=761 reason_code=source_timeout
+{"schema":"fm-project-status.v1","match":{"status":"unavailable","project":null,"candidates":[]},"current":{"state":"unavailable","reason_code":"source_timeout","reason_ids":[]},"underway":[]}

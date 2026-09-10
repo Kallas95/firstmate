@@ -1,0 +1,38 @@
+{
+  "captain_calls": [],
+  "counts": {
+    "captain_calls": 0,
+    "landed": 0,
+    "queued": 0,
+    "underway": 0
+  },
+  "current": {
+    "reason_code": null,
+    "reason_ids": [],
+    "state": "no_active_work"
+  },
+  "generated": "2026-09-10T22:30:40Z",
+  "match": {
+    "candidates": [],
+    "project": "AlphaProject",
+    "status": "exact"
+  },
+  "omitted": [],
+  "owner": {
+    "id": null,
+    "kind": "main"
+  },
+  "provenance": {
+    "age_seconds": 0,
+    "freshness": "fresh",
+    "observed_at": "2026-09-10T22:30:40Z",
+    "source": "fm-fleet-snapshot.v1/main",
+    "trust": "complete"
+  },
+  "query": "alphaproject",
+  "queued": [],
+  "recently_landed": [],
+  "schema": "fm-project-status.v1",
+  "underway": [],
+  "warnings": []
+}

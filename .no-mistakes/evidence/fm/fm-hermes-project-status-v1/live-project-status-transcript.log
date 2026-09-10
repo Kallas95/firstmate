@@ -1,0 +1,9 @@
+$ FM_HOME=<isolated-home> bin/fm-project-status.sh --json RunProject
+{"schema":"fm-project-status.v1","query":"RunProject","match":{"status":"exact","project":"RunProject","candidates":[]},"owner":{"kind":"main","id":null},"current":{"state":"working","reason_code":null,"reason_ids":[]},"underway":[{"id":"run-work","title":"Validating useful work","kind":"ship","state":"working","source":"run-step","doing":"validating (ci)","pr_url":null,"report_path":"/Users/max/.no-mistakes/worktrees/0e7dd249bdb3/01M26M2GYPJP8Y2Y2HWSD3FRCK/.test-live-project-status/home/data/run-work/report.md"}],"counts":{"underway":1,"captain_calls":0,"queued":0,"landed":0}}
+$ FM_HOME=<isolated-home> bin/fm-project-status.sh --json BetaMate
+{"schema":"fm-project-status.v1","query":"BetaMate","match":{"status":"exact","project":"BetaMate","candidates":[]},"owner":{"kind":"secondmate","id":"portfolio"},"current":{"state":"no_active_work","reason_code":null,"reason_ids":[]},"queued":[{"id":"beta-next","title":"Beta visible next work","kind":"ship","repo":"BetaMate","blocked_by_ids":[],"reason":null,"hold_kind":null,"hold_until":null,"hold_bucket":null,"captain_actionable":false}],"counts":{"underway":0,"captain_calls":0,"queued":1,"landed":0},"warnings":[],"omitted":[]}
+$ FM_HOME=<isolated-home> bin/fm-project-status.sh --json Collision
+{"schema":"fm-project-status.v1","query":"Collision","match":{"status":"ambiguous","project":null,"candidates":["Collision"]},"owner":null,"current":{"state":"unknown","reason_code":"ambiguous_project_owner","reason_ids":["main:","secondmate:portfolio"]}}
+$ FM_HOME=<isolated-home> bin/fm-project-status.sh --json Run
+{"schema":"fm-project-status.v1","query":"Run","match":{"status":"unknown","project":null,"candidates":[]},"owner":null,"current":{"state":"unknown","reason_code":"project_not_found","reason_ids":[]}}
+observation probe: no tmux or axi-logs invocation recorded
