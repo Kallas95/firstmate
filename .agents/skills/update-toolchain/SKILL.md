@@ -124,15 +124,15 @@ Update Pi itself without forcing a reinstall:
 pi update --self
 ```
 
-Update only globally managed, unpinned Pi packages after recording `pi list`:
+Update globally managed Pi packages while ignoring project-local settings after recording `pi list`:
 
 ```sh
 pi update --extensions --no-approve
 ```
 
 Do not use `pi update --all` because separate operations make partial failure and verification attributable.
-Pi skips pinned package versions and git refs by design.
-Report those pins as intentionally unchanged instead of moving them to a different ref.
+Pi skips version-pinned npm packages and does not advance pinned git refs, although it may reconcile a git checkout to its configured ref.
+Report those pins as intentionally not advanced instead of moving them to a different version or ref.
 Do not approve project-local settings or update a project-local package in this skill's ordinary path.
 
 Verify with:
