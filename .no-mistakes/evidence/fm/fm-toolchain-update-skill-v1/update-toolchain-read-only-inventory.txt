@@ -1,0 +1,18 @@
+Inventory only; no updates run.
+
+- **pi 0.87.0 — deferred (read-only boundary):** npm reports 0.87.1 available; global extensions recorded.
+- **claude 2.1.280 — custom or unsupported installation:** native diagnostics identify the launcher as unmanaged/custom.
+- **codex 0.155.1 — deferred (read-only boundary):** npm reports 0.156.0 available.
+- **herdr 0.9.1 — current:** Homebrew-owned; not outdated. Server/integration status intentionally not inspected (not a Herdr lab).
+- **no-mistakes v1.79.0 — deferred to protect active work:** daemon is running; shared-work state cannot be safely cleared because `axi status` cannot inspect this uninitialized repository.
+- **quota-axi 0.1.50 — current:** supported availability check reports no update.
+- **treehouse v2.3.0 — deferred (read-only boundary):** pool has no worktrees; no update performed.
+- **gh-axi 0.1.35 — current**
+- **chrome-devtools-axi 0.1.34 — deferred (read-only boundary):** npm reports 0.1.35 available.
+- **tasks-axi 0.2.5 — deferred (read-only boundary):** npm reports 0.2.6 available.
+- **lavish-axi 0.1.73 — deferred (read-only boundary):** npm reports 0.1.77 available.
+- **node v22.23.2 — custom or unsupported installation:** fnm-managed; no verified update owner inspected.
+- **npm 10.9.8 — custom or unsupported installation:** fnm-global installation; npm 12.1.0 is available but not updated.
+- **brew 7.0.6 — current:** no Homebrew self-update check was run due to the read-only boundary.
+
+Homebrew still has a pending package: `ollama` 0.34.2 → 0.34.3. No `brew update` was run; `brew outdated` automatically fetched Homebrew API data.

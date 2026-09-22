@@ -1,0 +1,10 @@
+Claude Code: **custom or unsupported installation** (update deferred/not applied).
+
+- Resolved launcher: `/Users/max/.local/bin/claude` → `/Users/max/.local/share/claude/current`
+- Version: `2.1.280`
+- Determined owner: native Claude Code installation (`claude doctor`: `Config install method: native`)
+- The native installer does **not** own the launcher symlink; diagnostics explicitly flag it as user-created/custom.
+- Not npm-owned (`@anthropic-ai/claude-code` absent) or Homebrew-owned; apt/dnf/apk are unavailable.
+- `claude update` supports only check-and-install, with no read-only check mode. Per this validation run, it was not invoked.
+
+**Update disposition:** availability cannot be safely determined without applying an update; no update was performed.

@@ -1,0 +1,6 @@
+apt=unavailable
+apt-get=unavailable
+dpkg-query=unavailable
+dnf=unavailable
+rpm=unavailable
+apk=unavailable
