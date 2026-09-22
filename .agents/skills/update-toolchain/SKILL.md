@@ -51,6 +51,9 @@ lavish-axi
 node
 npm
 brew
+apt
+dnf
+apk
 ```
 
 For every candidate updater, inspect its current help before using it.
