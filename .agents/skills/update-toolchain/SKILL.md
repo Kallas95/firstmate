@@ -66,10 +66,15 @@ brew list --versions <formula-or-cask>
 npm prefix -g
 npm root -g
 npm outdated -g --depth=0 --json
+dpkg-query -S <resolved-executable>
+rpm -qf <resolved-executable>
+apk info --who-owns <resolved-executable>
 ```
 
-Only call a Homebrew or npm update path when the resolved executable belongs to that manager's installed prefix and the manager recognizes the installed package.
-A wrapper, symlink, private build, version-manager shim, or executable outside the verified manager prefix is a custom installation unless its own `update` command is documented and succeeds.
+Only call a Homebrew, npm, apt, dnf, or apk update path when the resolved executable belongs to that manager's installed package and the manager recognizes the installed package.
+For Claude Code, confirm that the owning package is `claude-code` for apt, dnf, or apk, or `@anthropic-ai/claude-code` for npm; use both the resolved path and its canonical target when checking ownership so a package-managed symlink is not misclassified.
+Do not treat the mere presence of a package-manager command or a package with a similar name as ownership.
+A wrapper, symlink, private build, version-manager shim, or executable outside the verified manager prefix or package file list is a custom installation unless its own `update` command is documented and succeeds.
 Report custom installations without replacing them.
 
 Capture Homebrew's pending set before upgrading it:
@@ -145,21 +150,49 @@ pi list
 
 ### Claude Code and Codex
 
-Use each CLI's documented stable updater when the resolved executable is not confirmed to be Homebrew-managed:
+Dispatch a Claude Code update exclusively through the verified owner of the resolved executable:
+
+- For a native installation whose diagnostics confirm that it is managed by Claude Code, use `claude update`.
+- For an npm installation owned by `@anthropic-ai/claude-code`, use `npm install -g @anthropic-ai/claude-code@latest`; do not use `npm update -g`, which can remain within the originally installed semver range.
+- For an apt installation owned by `claude-code`, refresh package metadata and use the package's official upgrade path:
+
+  ```sh
+  sudo apt update
+  sudo apt upgrade claude-code
+  ```
+
+- For a dnf installation owned by `claude-code`, use:
+
+  ```sh
+  sudo dnf upgrade claude-code
+  ```
+
+- For an apk installation owned by `claude-code`, refresh package metadata and use:
+
+  ```sh
+  apk update
+  apk upgrade claude-code
+  ```
+
+Before an apt, dnf, or apk update, inspect the configured Claude Code repository and the package manager's proposed transaction without changing repository configuration.
+Proceed only when the configured repository is the stable Claude Code channel and the transaction upgrades the verified `claude-code` package without removing packages or changing unrelated toolchain packages; otherwise defer it with the reason.
+If privilege escalation requires authorization that the current session cannot obtain non-disruptively, defer the update rather than substituting another installer.
+
+When Claude Code or Codex is confirmed to be Homebrew-managed, update it only through the single corresponding Homebrew operation in the Homebrew section.
+For Codex outside Homebrew, use its documented updater when ownership and current help confirm that path:
 
 ```sh
-claude update
 codex update
 ```
 
-When the resolved executable is confirmed to be Homebrew-managed, update it only through the single Homebrew formula operation in the Homebrew section.
-Do not run both updater paths for the same executable.
-Do not opt into a preview or alternate release channel.
+Do not run multiple updater paths for the same executable, and do not opt into a preview or alternate release channel.
+After any Claude Code path, resolve the executable again before verification so a successful package transaction cannot mask a launcher owned by something else.
 
 Verify with:
 
 ```sh
 claude --version
+claude doctor
 claude --help
 codex --version
 codex --help
