@@ -35,10 +35,10 @@
 #               the tmux pi foreground-process probe). Identity is what makes
 #               Pi's blank separated composer provable; with identity=0 that
 #               shape stays `unknown`.
-#   pi-compact=1 the capture is Herdr's compact Pi surface. It permits its
-#                one-rule layout only after every structural and native-
-#                identity check below succeeds; every other adapter retains
-#                the existing recognized-shape boundary.
+#   pi-compact=1 the adapter supports Herdr's compact Pi surface. It permits
+#                that one-rule layout only after every structural, styled-row,
+#                trailing-screen, and native-identity check below succeeds;
+#                every other adapter retains the existing shape boundary.
 #   rows=<n>    the capture's bounded row count (informational).
 #
 # THE STRICT BLANK-ROW RULE (captain decision blank-row-injection-posture,
@@ -50,9 +50,9 @@
 # escalations into whatever it calls empty. Positive container proof means one
 # of the shapes in the catalogue below.
 #
-# THE SHAPE CATALOGUE (all verified against real harnesses; byte-level
-# captures in data/fm-composer-consolidation-audit-s1/report.md and
-# docs/verification/runtime-backends.md):
+# THE SHAPE CATALOGUE (live verification and byte-level capture evidence are
+# recorded in docs/verification/runtime-backends.md; the compact Pi addition is
+# currently covered by portable ANSI fixtures only):
 #   bordered   - a complete boxed composer: a top border, side-bordered content
 #                rows of the same family, and a bottom border (grok, kimi,
 #                older claude). The bottom border may carry a TITLE (grok
@@ -74,8 +74,10 @@
 #   separated  - pi: content rows between two solid horizontal `─` rules, no
 #                glyph and no side border. Herdr also has a compact form with
 #                a rounded status header, one unboxed input row, and a lower
-#                solid rule at the capture's end. Either form is provable only
-#                with a live agent identity reporting an idle/done pi, because
+#                solid rule with only blank capture rows after it. Its empty
+#                row additionally requires one reverse-video blank cursor cell.
+#                Either form is provable only with a live agent identity
+#                reporting an idle/done pi, because
 #                a blank region between transcript furniture is otherwise
 #                exactly the strict rule's unidentifiable blank row.
 #                A separated pair that closes over a bare AGENT-GLYPH row is a

@@ -3935,8 +3935,8 @@ test_composer_state_pi_parked_prompt_is_not_empty() {
 
 # Pi's compact Herdr layout has a rounded status header, one unboxed input
 # row, and one lower separator rather than the historical separator pair.
-# The ANSI reverse-video space is the actual idle cursor cell, not a synthetic
-# empty plain-text row.
+# The ANSI reverse-video space represents the required idle cursor evidence,
+# rather than a synthetic empty plain-text row.
 test_composer_state_pi_compact_idle_is_empty() {
   local dir log resp fb out calls case_id screen history i
   for case_id in no-history short-history long-history; do
