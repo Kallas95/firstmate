@@ -853,7 +853,8 @@ _fm_composer_scan_screen() {  # <plain-screen> <cursor-or-empty> [extract-wrap]
       # then the lower solid rule. Do not let a historical separator pair
       # masquerade as this newer shape.
       if [ "$pi_open" -lt 0 ] && [ "$top" -ge 0 ] \
-         && [ "$current_family" = rounded ] && [ "$row" -eq $((top + 2)) ]; then
+         && [ "$current_family" = rounded ] && [ "$row" -eq $((top + 2)) ] \
+         && ! fm_composer_row_has_edge "$(_fm_composer_screen_row "$((top + 1))" "$pane")"; then
         FM_COMPOSER_SCAN_PI_COMPACT_FOUND=1
         FM_COMPOSER_SCAN_PI_COMPACT_OPEN=$top
         FM_COMPOSER_SCAN_PI_COMPACT_CLOSE=$row
@@ -1796,17 +1797,35 @@ fm_composer_queued_enter_verdict() {  # <composer-state> <busy|idle|unknown>
   fi
 }
 
+_fm_composer_pi_compact_row_is_empty() {  # <raw-row>
+  local raw=$1 plain
+  plain=$(printf '%s\n' "$raw" | fm_composer_strip_ansi)
+  [ "$plain" = ' ' ] || return 1
+  case "$raw" in
+    *$'\033[7m '*) return 0 ;;
+  esac
+  return 1
+}
+
 _fm_composer_classify_pi_rows() {  # <screen> <styled> [compact]
-  local screen=$1 styled=$2 compact=${3:-0} row raw content open close
+  local screen=$1 styled=$2 compact=${3:-0} row raw content plain
   if [ "$compact" = 1 ]; then
-    open=$FM_COMPOSER_SCAN_PI_COMPACT_OPEN
-    close=$FM_COMPOSER_SCAN_PI_COMPACT_CLOSE
-  else
-    open=$FM_COMPOSER_SCAN_PI_OPEN
-    close=$FM_COMPOSER_SCAN_PI_CLOSE
+    [ "$styled" = 1 ] || { printf 'unknown'; return 0; }
+    raw=$(_fm_composer_screen_row "$((FM_COMPOSER_SCAN_PI_COMPACT_OPEN + 1))" "$screen")
+    if _fm_composer_pi_compact_row_is_empty "$raw"; then
+      printf 'empty'
+      return 0
+    fi
+    plain=$(printf '%s\n' "$raw" | fm_composer_strip_ansi)
+    if [ -n "$plain" ] && [ "$plain" != ' ' ]; then
+      printf 'pending'
+    else
+      printf 'unknown'
+    fi
+    return 0
   fi
-  row=$((open + 1))
-  while [ "$row" -lt "$close" ]; do
+  row=$((FM_COMPOSER_SCAN_PI_OPEN + 1))
+  while [ "$row" -lt "$FM_COMPOSER_SCAN_PI_CLOSE" ]; do
     raw=$(_fm_composer_screen_row "$row" "$screen")
     content=$(_fm_composer_row_content "$raw" "$styled")
     fm_composer_normalize_trim_var content

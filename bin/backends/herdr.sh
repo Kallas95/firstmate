@@ -3110,7 +3110,7 @@ fm_backend_herdr_composer_state() {  # <target> -> empty|pending|pending-unprove
   if cap=$(fm_backend_herdr_capture_ansi "$target" "$FM_COMPOSER_CAPTURE_LINES" 2>/dev/null); then
     caps=$(printf 'styled=1\ncursor=0\nidentity=1\npi-compact=1\nrows=%s' "$FM_COMPOSER_CAPTURE_LINES")
   elif cap=$(fm_backend_herdr_capture "$target" "$FM_COMPOSER_CAPTURE_LINES"); then
-    caps=$(printf 'styled=0\ncursor=0\nidentity=1\npi-compact=1\nrows=%s' "$FM_COMPOSER_CAPTURE_LINES")
+    caps=$(printf 'styled=0\ncursor=0\nidentity=1\nrows=%s' "$FM_COMPOSER_CAPTURE_LINES")
   else
     printf 'unknown'
     return 0
