@@ -3933,6 +3933,57 @@ test_composer_state_pi_parked_prompt_is_not_empty() {
   pass "fm_backend_herdr_composer_state: a blocked pi pane parked on a prompt is not an empty composer"
 }
 
+# Pi's compact Herdr layout has a rounded status header, one unboxed input
+# row, and one lower separator rather than the historical separator pair.
+# The ANSI reverse-video space is the actual idle cursor cell, not a synthetic
+# empty plain-text row.
+test_composer_state_pi_compact_idle_is_empty() {
+  local dir log resp fb out calls
+  dir="$TMP_ROOT/composer-pi-compact-idle"; mkdir -p "$dir/responses"; log="$dir/log"; resp="$dir/responses"; : > "$log"
+  printf '\x1b[38;2;129;162;190m╭ gpt-5.6-terra · firstmate ────────────────╮\x1b[0m\n\x1b[7m \x1b[0m\n\x1b[38;2;129;162;190m─────────────────────────────────────────────\x1b[0m\n' > "$resp/1.out"
+  printf '{"result":{"agent":{"agent":"pi","agent_status":"idle"}}}\n' > "$resp/2.out"
+  fb=$(make_herdr_fakebin "$dir")
+  out=$( PATH="$fb:$PATH" FM_HERDR_LOG="$log" FM_HERDR_RESPONSES="$resp" \
+    bash -c '. "$0/bin/backends/herdr.sh"; fm_backend_herdr_composer_state lab:w1:p2' "$ROOT" )
+  [ "$out" = empty ] || fail "a native idle Pi compact composer should read empty, got '$out'"
+  calls=$(grep -c $'\x1f''agent'$'\x1f''get' "$log")
+  [ "$calls" -eq 1 ] || fail "Pi compact recognition must corroborate identity exactly once, made $calls agent calls"
+  pass "fm_backend_herdr_composer_state: a native idle Pi compact composer reads empty"
+}
+
+test_composer_state_pi_compact_refuses_unproven_variants() {
+  local dir log resp fb out case_id screen identity want
+  for case_id in draft continuation working blocked absent-identity contradictory-identity truncated shell; do
+    dir="$TMP_ROOT/composer-pi-compact-$case_id"; mkdir -p "$dir/responses"; log="$dir/log"; resp="$dir/responses"; : > "$log"
+    screen=$'\033[38;2;129;162;190m╭ gpt-5.6-terra · firstmate ────────────────╮\033[0m\n\033[7m \033[0m\n\033[38;2;129;162;190m─────────────────────────────────────────────\033[0m\n'
+    identity='{"result":{"agent":{"agent":"pi","agent_status":"idle"}}}'
+    want=unknown
+    case "$case_id" in
+      draft)
+        screen=$'\033[38;2;129;162;190m╭ gpt-5.6-terra · firstmate ────────────────╮\033[0m\nprivacy-safe draft\033[7m \033[0m\n\033[38;2;129;162;190m─────────────────────────────────────────────\033[0m\n'
+        want=pending
+        ;;
+      continuation)
+        screen=$'\033[38;2;129;162;190m╭ gpt-5.6-terra · firstmate ────────────────╮\033[0m\n> continued input\033[7m \033[0m\n\033[38;2;129;162;190m─────────────────────────────────────────────\033[0m\n'
+        want=pending
+        ;;
+      working) identity='{"result":{"agent":{"agent":"pi","agent_status":"working"}}}' ;;
+      blocked) identity='{"result":{"agent":{"agent":"pi","agent_status":"blocked"}}}' ;;
+      absent-identity) printf '1\n' > "$resp/2.exit" ;;
+      contradictory-identity) identity='{"result":{"agent":{"agent":"shell","agent_status":"idle"}}}' ;;
+      truncated) screen=$'\033[38;2;129;162;190m╭ gpt-5.6-terra · firstmate ────────────────╮\033[0m\n\033[7m \033[0m\n' ;;
+      shell) screen+=$'\n$ prompt after stale Pi registration\n' ;;
+    esac
+    printf '%s' "$screen" > "$resp/1.out"
+    [ -e "$resp/2.exit" ] || printf '%s\n' "$identity" > "$resp/2.out"
+    fb=$(make_herdr_fakebin "$dir")
+    out=$( PATH="$fb:$PATH" FM_HERDR_LOG="$log" FM_HERDR_RESPONSES="$resp" \
+      bash -c '. "$0/bin/backends/herdr.sh"; fm_backend_herdr_composer_state lab:w1:p2' "$ROOT" )
+    [ "$out" = "$want" ] || fail "unsafe Pi compact case '$case_id' must read '$want', got '$out'"
+  done
+  pass "fm_backend_herdr_composer_state: compact Pi needs empty input, idle identity, complete capture, and no shell"
+}
+
 test_composer_state_pi_separator_real_text_is_pending() {
   local dir log resp fb out
   dir="$TMP_ROOT/composer-pi-separated-pending"; mkdir -p "$dir/responses"; log="$dir/log"; resp="$dir/responses"; : > "$log"
@@ -5732,6 +5783,8 @@ test_composer_state_unknown_on_capture_failure
 test_composer_state_unknown_when_no_composer_row_found
 test_composer_state_pi_parked_prompt_is_not_empty
 test_composer_state_pi_separator_idle_is_empty
+test_composer_state_pi_compact_idle_is_empty
+test_composer_state_pi_compact_refuses_unproven_variants
 test_composer_state_pi_separator_real_text_is_pending
 test_composer_state_pi_incomplete_separator_below_stale_generic_is_unknown
 test_composer_state_pi_separator_requires_safe_native_identity

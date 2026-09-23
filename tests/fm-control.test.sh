@@ -288,6 +288,33 @@ test_exit_types_each_harness_verified_command() {
   pass "fm-control exit: every verified harness gets its own verified exit command"
 }
 
+# The classifier has already separated each unsafe compact-Pi variant from an
+# affirmatively empty composer. This is the final lifecycle boundary: none may
+# turn an unproven read into Pi's /quit command.
+test_pi_exit_refuses_unproven_composer_variants_without_quit() {
+  local dir out rc case_id pane
+  for case_id in draft continuation working blocked missing-identity truncated shell; do
+    dir=$(new_case "pi-exit-$case_id")
+    add_task "$dir" t1 pi
+    alive_as "$dir" pi
+    case "$case_id" in
+      draft) pane=$'╭────╮\n│ privacy-safe draft │\n╰────╯\n' ;;
+      continuation) pane=$'╭────╮\n│ > continued input │\n╰────╯\n' ;;
+      working) pane=$'Pi is working\n\n' ;;
+      blocked) pane=$'Choose an action\n  1. Continue\n' ;;
+      missing-identity) pane=$'╭ Pi status ╮\n \n────────────────\n' ;;
+      truncated) pane=$'╭ Pi status ╮\n \n' ;;
+      shell) pane=$'$ shell prompt\n' ;;
+    esac
+    printf '%s' "$pane" > "$dir/fake/pane"
+    out=$(run_control "$dir" t1 exit); rc=$?
+    expect_code 1 "$rc" "Pi exit must refuse the unproven '$case_id' composer shape"$'\n'"$out"
+    [ ! -s "$dir/fake/literal" ] \
+      || fail "Pi exit typed /quit for unsafe '$case_id' composer evidence: $(literals "$dir")"
+  done
+  pass "fm-control Pi exit: every unproven composer variant refuses before /quit"
+}
+
 test_interrupt_sends_each_harness_verified_key() {
   local dir out rc harness expected key repeat clear got want
   for harness in $VERIFIED_HARNESSES; do
@@ -1032,6 +1059,7 @@ test_fm_send_still_marks_the_same_secondmate_task() {
 }
 
 test_exit_types_each_harness_verified_command
+test_pi_exit_refuses_unproven_composer_variants_without_quit
 test_interrupt_sends_each_harness_verified_key
 test_devin_interrupt_invalidates_busy
 test_devin_idle_interrupt_sends_one_press
