@@ -3089,8 +3089,8 @@ fm_backend_herdr_agent_identity_raw() {  # <session> <pane> -> <agent>\t<status>
 }
 
 # fm_backend_herdr_composer_identity: the native agent identity/state probe
-# backing the shared classifier's separated (pi) shape - the genuine herdr
-# primitive no other backend has natively.
+# backing the shared classifier's separated and compact Pi shapes - the genuine
+# herdr primitive no other backend has natively.
 fm_backend_herdr_composer_identity() {  # <target> -> "<agent>\t<status>"
   fm_backend_herdr_parse_target "$1" || return 1
   fm_backend_herdr_agent_identity_raw "$FM_BACKEND_HERDR_SESSION" "$FM_BACKEND_HERDR_PANE"
@@ -3101,9 +3101,8 @@ fm_backend_herdr_composer_identity() {  # <target> -> "<agent>\t<status>"
 # shared classifier strip ghost/placeholder text); when it fails on an older
 # herdr, the plain capture degrades the descriptor to styled=0 rather than
 # letting ghost text be misread as typed input. Identity is fetched lazily,
-# only when the classifier reports the verdict depends on it (a pi separator
-# pair below every other candidate), preserving this adapter's original
-# consult-only-when-needed behavior.
+# only when the classifier selects an identity-dependent Pi shape, preserving
+# this adapter's original consult-only-when-needed behavior.
 fm_backend_herdr_composer_state() {  # <target> -> empty|pending|pending-unproven|unknown
   local target=$1 cap caps verdict identity
   fm_backend_herdr_parse_target "$target" || { printf 'unknown'; return 0; }
