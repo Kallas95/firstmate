@@ -1,0 +1,9 @@
+ok - real Pi primary: the away posture is recorded with no daemon launched
+ok - real Pi/Herdr: nothing injects into the captain pane under the away posture
+ok - real unmarked Pi return renders the brief, opens catch-up, and reports that posture through Bearings while the blocker stays Firstmate's to remediate
+WARNING: watcher still down (same stale episode; last beat: never, grace 300s) - full banner already printed this episode.
+fm-afk-launch: away-posture record archived at /private/var/folders/5q/snmnm0_926ddy6xlmggzx1g80000gn/T/fm-afk-pi-return-e2e.C60UOB/home/state/afk-contracts/1790202225.afk-contract
+fm-afk-launch: away mode stopped; no daemon terminal was running, .afk cleared, and the posture record archived
+WARNING: watcher still down (same stale episode; last beat: never, grace 300s) - full banner already printed this episode.
+ok - resolved return catch-up allows Bearings and a clean idempotent away re-entry
+evidence: herdr=herdr 0.9.1 pi=0.87.1 target=fm-lab-fm-afk-pi-return-80404-21962:w1:p1 archived-records=2

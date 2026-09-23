@@ -1,0 +1,29 @@
+exec env PI_CODING_AGENT_DIR=/Users/max/.no-mistakes/worktrees/e8c7ce9bd0ec/01M385JW1RFK5DFFRYRG5CJ29N/.test-compact-mo
+del-5644/pi-agent pi -e /Users/max/.no-mistakes/worktrees/e8c7ce9bd0ec/01M385JW1RFK5DFFRYRG5CJ29N/.test-compact-model-5
+644/model.ts --provider local-evidence --model deterministic --no-context-files --no-session
+[0m[1m[38;5;6m01M385JW1RFK5DFFRYRG5CJ29N/.test-compact-model-5644/project[0m on [0m[1m[38;5;5m HEAD[0m [0m[1m[38;5;1m[?][0m 
+[0m[38;5;5m❯[0m [0m[4m[38;5;2mexec[0m [0m[4m[38;5;2menv[0m PI_CODING_AGENT_DIR=[0m[4m/Users/max/.no-mistakes/worktrees/e8c7ce9bd0ec/01M385JW1RFK5DFFRYRG5CJ29N/.test-compact-[0m
+[0m[4mmodel-5644/pi-agent[0m [0m[38;5;2mpi[0m -e [0m[4m/Users/max/.no-mistakes/worktrees/e8c7ce9bd0ec/01M385JW1RFK5DFFRYRG5CJ29N/.test-compact-model[0m
+[0m[4m-5644/model.ts[0m --provider local-evidence --model deterministic --no-context-files --no-session
+
+ [0m[1m[38;2;138;190;183mpi[0m[38;2;102;102;102m v0.87.1[0m                                                                                                            
+ [0m[38;2;102;102;102mescape[0m[38;2;128;128;128m interrupt · [0m[38;2;102;102;102mctrl+c/ctrl+d[0m[38;2;128;128;128m clear/exit · [0m[38;2;102;102;102m/[0m[38;2;128;128;128m commands · [0m[38;2;102;102;102m![0m[38;2;128;128;128m bash · [0m[38;2;102;102;102mctrl+o[0m[38;2;128;128;128m more[0m                                       
+ [0m[38;2;102;102;102mPress ctrl+o to show full startup help and loaded resources.[0m                                                          
+                                                                                                                       
+ [0m[38;2;102;102;102mPi can explain its own features and look up its docs. Ask it how to use or extend Pi.[0m                                 
+
+[0m[38;2;240;198;116m[Skills][0m                                                                                                               
+[0m[38;2;102;102;102m  afk, ahoy, ask-user-authority, bearings, bootstrap-diagnostics, captain-hold-lifecycle, decision-hold-lifecycle,     [0m
+[0m[38;2;102;102;102mdiagnostic-reasoning, firstmate-codexapp, firstmate-coding-guidelines, firstmate-orca, fmx-respond, harness-adapters,  [0m
+[0m[38;2;102;102;102mno-mistakes, process-event-sources, project-management, quiet, quota-array-dispatch, secondmate-provisioning, stow,    [0m
+[0m[38;2;102;102;102mstuck-crewmate-recovery, updatefirstmate[0m                                                                               
+
+[0m[38;2;240;198;116m[Extensions][0m                                                                                                           
+[0m[38;2;102;102;102m  model.ts[0m                                                                                                             
+
+
+[0m[38;2;80;80;80m───────────────────────────────────────────────────────────────────────────────────────────────────────────────────────[0m
+[0m[7m [0m                                                                                                                      
+[0m[38;2;80;80;80m───────────────────────────────────────────────────────────────────────────────────────────────────────────────────────[0m
+[0m[38;2;102;102;102m~/.no-mistakes/worktrees/e8c7ce9bd0ec/01M385JW1RFK5DFFRYRG5CJ29N/.test-compact-model-5644/project (detached)[0m
+[0m[38;2;102;102;102m0.0%/4.1k (auto)                                                                                          deterministic[0m
