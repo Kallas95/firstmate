@@ -330,8 +330,8 @@ test_exit_types_each_harness_verified_command() {
 }
 
 test_pi_exit_uses_herdr_compact_proof_boundary() {
-  local dir out rc case_id screen mode
-  for case_id in idle draft whitespace boxed unstyled-row continuation working blocked missing-identity contradictory-identity truncated shell; do
+  local dir out rc case_id screen mode history i
+  for case_id in idle idle-short-history idle-long-history draft whitespace boxed unstyled-row continuation working blocked missing-identity contradictory-identity truncated shell; do
     dir=$(new_case "pi-herdr-exit-$case_id")
     add_task "$dir" t1 pi ship herdr "lab:w1:p2"
     {
@@ -342,7 +342,13 @@ test_pi_exit_uses_herdr_compact_proof_boundary() {
     } >> "$dir/home/state/t1.meta"
     screen=$'\033[38;2;129;162;190m╭ gpt-5.6-terra · firstmate ────────────────╮\033[0m\n\033[7m \033[0m\n\033[38;2;129;162;190m─────────────────────────────────────────────\033[0m\n'
     mode=idle
+    history=
     case "$case_id" in
+      idle-short-history) history=$'\033[38;2;129;162;190m─────────────────────────────────────────────\033[0m\nold transcript one\nold transcript two\n' ;;
+      idle-long-history)
+        history=$'\033[38;2;129;162;190m─────────────────────────────────────────────\033[0m\n'
+        for i in $(seq 1 9); do history+="old transcript $i"$'\n'; done
+        ;;
       draft) screen=$'\033[38;2;129;162;190m╭ gpt-5.6-terra · firstmate ────────────────╮\033[0m\nprivacy-safe draft\033[7m \033[0m\n\033[38;2;129;162;190m─────────────────────────────────────────────\033[0m\n' ;;
       whitespace) screen=$'\033[38;2;129;162;190m╭ gpt-5.6-terra · firstmate ────────────────╮\033[0m\n  \033[7m \033[0m\n\033[38;2;129;162;190m─────────────────────────────────────────────\033[0m\n' ;;
       boxed) screen=$'\033[38;2;129;162;190m╭ gpt-5.6-terra · firstmate ────────────────╮\033[0m\n│\033[7m \033[0m│\n\033[38;2;129;162;190m─────────────────────────────────────────────\033[0m\n' ;;
@@ -352,18 +358,21 @@ test_pi_exit_uses_herdr_compact_proof_boundary() {
       truncated) screen=$'\033[38;2;129;162;190m╭ gpt-5.6-terra · firstmate ────────────────╮\033[0m\n\033[7m \033[0m\n' ;;
       shell) screen+=$'\n$ prompt after stale Pi registration\n' ;;
     esac
-    printf '%s' "$screen" > "$dir/fake/herdr-screen"
+    printf '%s' "$history$screen" > "$dir/fake/herdr-screen"
     printf '%s' "$mode" > "$dir/fake/herdr-mode"
     out=$(run_control "$dir" t1 exit); rc=$?
-    if [ "$case_id" = idle ]; then
-      expect_code 0 "$rc" "idle native compact Pi exit should succeed"$'\n'"$out"
+    case "$case_id" in
+      idle|idle-short-history|idle-long-history)
+      expect_code 0 "$rc" "idle native compact Pi exit with $case_id should succeed"$'\n'"$out"
       [ "$(literals "$dir")" = /quit ] \
-        || fail "idle native compact Pi exit should type exactly /quit, got: $(literals "$dir")"
-    else
-      expect_code 1 "$rc" "Pi exit must refuse the unproven Herdr '$case_id' compact shape"$'\n'"$out"
-      [ ! -s "$dir/fake/literal" ] \
-        || fail "Pi exit typed /quit for unsafe Herdr '$case_id' evidence: $(literals "$dir")"
-    fi
+        || fail "idle native compact Pi exit with $case_id should type exactly /quit, got: $(literals "$dir")"
+      ;;
+      *)
+        expect_code 1 "$rc" "Pi exit must refuse the unproven Herdr '$case_id' compact shape"$'\n'"$out"
+        [ ! -s "$dir/fake/literal" ] \
+          || fail "Pi exit typed /quit for unsafe Herdr '$case_id' evidence: $(literals "$dir")"
+        ;;
+    esac
   done
   pass "fm-control Pi exit: Herdr compact proof alone permits /quit"
 }

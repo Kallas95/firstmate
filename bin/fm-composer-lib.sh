@@ -852,8 +852,8 @@ _fm_composer_scan_screen() {  # <plain-screen> <cursor-or-empty> [extract-wrap]
       # status header is immediately followed by its one unboxed input row,
       # then the lower solid rule. Do not let a historical separator pair
       # masquerade as this newer shape.
-      if [ "$pi_open" -lt 0 ] && [ "$top" -ge 0 ] \
-         && [ "$current_family" = rounded ] && [ "$row" -eq $((top + 2)) ] \
+      if [ "$top" -ge 0 ] && [ "$current_family" = rounded ] \
+         && [ "$row" -eq $((top + 2)) ] \
          && ! fm_composer_row_has_edge "$(_fm_composer_screen_row "$((top + 1))" "$pane")"; then
         FM_COMPOSER_SCAN_PI_COMPACT_FOUND=1
         FM_COMPOSER_SCAN_PI_COMPACT_OPEN=$top
@@ -1490,7 +1490,6 @@ _fm_composer_select_cursorless() {
   fi
   if [ "$FM_COMPOSER_SCAN_PI_COMPACT_FOUND" = 1 ] \
      && [ "${FM_COMPOSER_PI_COMPACT_CAPABLE:-0}" = 1 ] \
-     && [ "$FM_COMPOSER_SCAN_PI_PAIR_FOUND" = 0 ] \
      && [ "$FM_COMPOSER_SCAN_PI_COMPACT_CLOSE" -gt "$generic" ] \
      && _fm_composer_pi_compact_trailing_safe "$plain"; then
     FM_COMPOSER_SELECTED_KIND=pi-compact
@@ -1723,8 +1722,11 @@ EOF
     return 0
   fi
   case "$FM_COMPOSER_SELECTED_KIND" in
-    pi|pi-compact)
+    pi)
       _fm_composer_pi_verdict "$screen" "$styled" "$has_identity" "$identity"
+      ;;
+    pi-compact)
+      _fm_composer_pi_verdict "$screen" "$styled" "$has_identity" "$identity" 1
       ;;
     box)
       _fm_composer_classify_rows "$screen" "$styled" "$FM_COMPOSER_SELECTED_AMBIG" \
@@ -1869,8 +1871,8 @@ _fm_composer_classify_bare_pi_overlap() {  # <screen> <styled> <has-identity> <i
 # is drawn above the separator pair, so the composer region looks free while the
 # keys would answer the prompt instead of composing (issue #2797). Structure
 # cannot disprove that, so a blocked pi defers rather than claiming empty.
-_fm_composer_pi_verdict() {  # <screen> <styled> <has_identity> <identity>
-  local screen=$1 styled=$2 has_identity=$3 identity=$4 agent agent_status state
+_fm_composer_pi_verdict() {  # <screen> <styled> <has_identity> <identity> [compact]
+  local screen=$1 styled=$2 has_identity=$3 identity=$4 compact=${5:-0} agent agent_status state
   if [ "$has_identity" != 1 ]; then
     printf 'unknown'
     return 0
@@ -1889,11 +1891,15 @@ _fm_composer_pi_verdict() {  # <screen> <styled> <has_identity> <identity>
     printf 'unknown'
     return 0
   fi
-  if [ "$FM_COMPOSER_SCAN_PI_PAIR_VALID" = 1 ]; then
-    state=$(_fm_composer_classify_pi_rows "$screen" "$styled")
-  elif [ "$FM_COMPOSER_SCAN_PI_COMPACT_FOUND" = 1 ] \
-       && [ "${FM_COMPOSER_PI_COMPACT_CAPABLE:-0}" = 1 ]; then
+  if [ "$compact" = 1 ]; then
+    if [ "$FM_COMPOSER_SCAN_PI_COMPACT_FOUND" != 1 ] \
+       || [ "${FM_COMPOSER_PI_COMPACT_CAPABLE:-0}" != 1 ]; then
+      printf 'unknown'
+      return 0
+    fi
     state=$(_fm_composer_classify_pi_rows "$screen" "$styled" 1)
+  elif [ "$FM_COMPOSER_SCAN_PI_PAIR_VALID" = 1 ]; then
+    state=$(_fm_composer_classify_pi_rows "$screen" "$styled")
   else
     printf 'unknown'
     return 0
