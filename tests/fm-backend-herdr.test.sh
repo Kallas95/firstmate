@@ -3953,7 +3953,7 @@ test_composer_state_pi_compact_idle_is_empty() {
 
 test_composer_state_pi_compact_refuses_unproven_variants() {
   local dir log resp fb out case_id screen identity want
-  for case_id in draft whitespace boxed continuation working blocked absent-identity contradictory-identity truncated shell; do
+  for case_id in draft whitespace boxed unstyled-row continuation working blocked absent-identity contradictory-identity truncated shell; do
     dir="$TMP_ROOT/composer-pi-compact-$case_id"; mkdir -p "$dir/responses"; log="$dir/log"; resp="$dir/responses"; : > "$log"
     screen=$'\033[38;2;129;162;190m╭ gpt-5.6-terra · firstmate ────────────────╮\033[0m\n\033[7m \033[0m\n\033[38;2;129;162;190m─────────────────────────────────────────────\033[0m\n'
     identity='{"result":{"agent":{"agent":"pi","agent_status":"idle"}}}'
@@ -3969,6 +3969,9 @@ test_composer_state_pi_compact_refuses_unproven_variants() {
         ;;
       boxed)
         screen=$'\033[38;2;129;162;190m╭ gpt-5.6-terra · firstmate ────────────────╮\033[0m\n│\033[7m \033[0m│\n\033[38;2;129;162;190m─────────────────────────────────────────────\033[0m\n'
+        ;;
+      unstyled-row)
+        screen=$'\033[38;2;129;162;190m╭ gpt-5.6-terra · firstmate ────────────────╮\033[0m\n \n\033[38;2;129;162;190m─────────────────────────────────────────────\033[0m\n'
         ;;
       continuation)
         screen=$'\033[38;2;129;162;190m╭ gpt-5.6-terra · firstmate ────────────────╮\033[0m\n> continued input\033[7m \033[0m\n\033[38;2;129;162;190m─────────────────────────────────────────────\033[0m\n'

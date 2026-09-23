@@ -1898,10 +1898,11 @@ _fm_composer_pi_verdict() {  # <screen> <styled> <has_identity> <identity>
     printf 'unknown'
     return 0
   fi
-  if [ "$state" = pending ]; then
-    printf 'pending'
-    return 0
-  fi
+  case "$state" in
+    pending) printf 'pending'; return 0 ;;
+    empty) ;;
+    *) printf 'unknown'; return 0 ;;
+  esac
   case "$agent_status" in
     idle|done) printf 'empty' ;;
     *) printf 'unknown' ;;
