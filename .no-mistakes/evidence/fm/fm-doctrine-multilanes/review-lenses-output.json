@@ -1,0 +1,43 @@
+{
+  "rounds": [
+    {
+      "round": 1,
+      "lens": "cold read",
+      "approach": "Read the artifact before seeing the implementer's narrative to avoid anchoring."
+    },
+    {
+      "round": 2,
+      "lens": "execution",
+      "approach": "Exercise the artifact, tests, or reproduction rather than only rereading it."
+    },
+    {
+      "round": 3,
+      "lens": "contract audit",
+      "approach": "Compare the result directly against the original intake requirements rather than the implementation's framing."
+    },
+    {
+      "round": 4,
+      "lens": "contract audit",
+      "approach": "Audit the result against the original acceptance criteria rather than the implementation's framing."
+    }
+  ],
+  "reviewer_briefs": [
+    {
+      "reviewer": 1,
+      "brief": "diff-only",
+      "receives": "The change diff, with instructions to judge the change on its own terms."
+    },
+    {
+      "reviewer": 2,
+      "brief": "full-context",
+      "receives": "The change plus surrounding code and relevant history."
+    },
+    {
+      "reviewer": 3,
+      "brief": "checkout-and-run",
+      "receives": "An isolated checkout with the artifact, tests, and reproduction or execution instructions."
+    }
+  ],
+  "added_rounds": 0,
+  "added_gate": false
+}

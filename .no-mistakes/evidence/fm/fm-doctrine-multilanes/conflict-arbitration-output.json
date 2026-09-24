@@ -1,0 +1,40 @@
+{
+  "trigger": "Actual semantic merge conflict in one textual hunk between parallel contributions with both intents provided verbatim.",
+  "resolution": "request_timeout = 30; authorize(); log_request_id(); start_request(); remove increment_legacy_retry().",
+  "decisions": [
+    {
+      "class": "same-question-different-answer",
+      "selected_result": "Set request_timeout to 30 because the documented 30-second interactive SLA is more specific than a conservative default.",
+      "intent_evidence": {
+        "contribution_A": "Set request_timeout to 30 because the documented interactive SLA requires failures within 30 seconds. Add a request-id log line for timeout diagnosis. Remove the legacy retry counter because the new deadline loop replaces it.",
+        "contribution_B": "Set request_timeout to 60 as a conservative default. Require authorization before starting the request. Keep the legacy retry counter unchanged."
+      }
+    },
+    {
+      "class": "disjoint-intent",
+      "selected_result": "Retain log_request_id() before start_request().",
+      "intent_evidence": {
+        "contribution_A": "Set request_timeout to 30 because the documented interactive SLA requires failures within 30 seconds. Add a request-id log line for timeout diagnosis. Remove the legacy retry counter because the new deadline loop replaces it.",
+        "contribution_B": "Set request_timeout to 60 as a conservative default. Require authorization before starting the request. Keep the legacy retry counter unchanged."
+      }
+    },
+    {
+      "class": "disjoint-intent",
+      "selected_result": "Retain authorize() before start_request().",
+      "intent_evidence": {
+        "contribution_A": "Set request_timeout to 30 because the documented interactive SLA requires failures within 30 seconds. Add a request-id log line for timeout diagnosis. Remove the legacy retry counter because the new deadline loop replaces it.",
+        "contribution_B": "Set request_timeout to 60 as a conservative default. Require authorization before starting the request. Keep the legacy retry counter unchanged."
+      }
+    },
+    {
+      "class": "superseded",
+      "selected_result": "Remove increment_legacy_retry() because the new deadline loop replaces the legacy retry counter.",
+      "intent_evidence": {
+        "contribution_A": "Set request_timeout to 30 because the documented interactive SLA requires failures within 30 seconds. Add a request-id log line for timeout diagnosis. Remove the legacy retry counter because the new deadline loop replaces it.",
+        "contribution_B": "Set request_timeout to 60 as a conservative default. Require authorization before starting the request. Keep the legacy retry counter unchanged."
+      }
+    }
+  ],
+  "non_conflict_change": false,
+  "escalation": false
+}

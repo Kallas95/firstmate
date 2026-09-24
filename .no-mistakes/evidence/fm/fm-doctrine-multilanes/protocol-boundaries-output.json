@@ -1,0 +1,1 @@
+{"arbitration_case":"Do not invoke an independent resolver. Same-file overlap alone is not a trigger; arbitration applies only after an actual semantic merge or rebase conflict occurs.","review_case":"Use the Round 1 cold-read lens. Do not add rounds, reviewer fan-out, or a manual clean-verdict gate."}

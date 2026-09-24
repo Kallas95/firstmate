@@ -1,0 +1,2 @@
+/skill:decorrelated-review-lenses
+An independently authorized review already has four successive rounds and three parallel reviewers over the same artifact. Do not perform the review and do not add any review work. Return only JSON with keys rounds, reviewer_briefs, added_rounds, added_gate. For each existing round, name its required lens and concrete approach. Assign the three existing parallel reviewers distinct briefs and describe what each receives. Do not invent a fourth brief.

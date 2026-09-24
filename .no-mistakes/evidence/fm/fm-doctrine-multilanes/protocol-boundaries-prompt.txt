@@ -1,0 +1,5 @@
+Load and follow both /skill:merge-conflict-arbitration and /skill:decorrelated-review-lenses for this protocol-routing evaluation. Do not edit files. Return only a JSON object with exactly two keys, arbitration_case and review_case.
+
+arbitration_case: Two parallel contributions touch the same file but different, cleanly merging lines. No merge or rebase reports a textual or semantic conflict. State whether to invoke an independent resolver now and why.
+
+review_case: An independently authorized review has exactly one round and no reviewer fan-out. State the lens for the existing round and whether to add rounds, fan-out, or a manual clean-verdict gate.

@@ -1,0 +1,12 @@
+/skill:merge-conflict-arbitration
+Act as the independent resolver; you authored neither contribution. Do not edit files. Return only JSON with keys trigger, resolution, decisions, non_conflict_change, escalation. Preserve both intents verbatim as evidence in decisions.
+
+Contribution A intent verbatim: "Set request_timeout to 30 because the documented interactive SLA requires failures within 30 seconds. Add a request-id log line for timeout diagnosis. Remove the legacy retry counter because the new deadline loop replaces it."
+Contribution B intent verbatim: "Set request_timeout to 60 as a conservative default. Require authorization before starting the request. Keep the legacy retry counter unchanged."
+
+The actual conflict is one textual hunk containing all of these semantic changes:
+A side: request_timeout = 30; log_request_id(); then start_request(); and deletes increment_legacy_retry().
+B side: request_timeout = 60; authorize(); then start_request(); and retains increment_legacy_retry().
+Outside the conflict hunk is footer_text = "stable".
+
+Resolve the hunk from the stated intents. In decisions, provide one object per semantic decision with class, selected_result, and intent_evidence. Set non_conflict_change to whether footer_text should be changed. Escalate only if the protocol requires it.
