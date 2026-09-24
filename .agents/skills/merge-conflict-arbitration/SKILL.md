@@ -20,7 +20,8 @@ This protocol prepares a resolution without changing the selected delivery path 
 The older proposal required the merge authority to receive every same-question choice for veto before the resolution landed.
 That would add a manual approval gate outside the current delivery path, so it is not retained.
 Record the decision summary with the normal resolution or PR evidence for the existing authority to review.
-Escalate only when the conflicting intents leave a genuine captain decision rather than an implementation reconciliation.
+The resolver must select one answer whenever the intent evidence distinguishes the competing answers.
+Escalate for the captain's choice only when the intents genuinely tie and support incompatible answers.
 
 ## Independent resolver and inputs
 
@@ -34,7 +35,7 @@ A resolution based on diffs alone guesses at intent and is not arbitration.
 Classify every conflicted hunk into exactly one class:
 
 - **disjoint-intent** - The contributions answer different questions in the same region, so combine both changes.
-- **same-question-different-answer** - The contributions answer the same question differently, so select one answer supported by the stated intents and do not synthesize an unrequested hybrid.
+- **same-question-different-answer** - The contributions answer the same question differently, so select the one answer better supported by the stated intents and do not synthesize an unrequested hybrid; if the intents genuinely tie and support incompatible answers, escalate for the captain's choice.
 - **superseded** - One contribution makes the other obsolete, so retain the surviving contribution.
 
 ## Resolution boundary and record
@@ -42,8 +43,3 @@ Classify every conflicted hunk into exactly one class:
 Change only conflict regions.
 Do not refactor, restyle, or improve non-conflicting code while resolving the conflict.
 Record every hunk's class, selected result, and intent evidence with the normal resolution or PR evidence.
-
-## Hotspot signal
-
-Repeated actual conflicts on the same file across dispatches indicate a hotspot to decompose rather than routine reconciliation.
-Surface that signal as a separate finding.
