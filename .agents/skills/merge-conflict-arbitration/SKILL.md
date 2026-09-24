@@ -3,7 +3,7 @@ name: merge-conflict-arbitration
 description: >-
   Agent-only protocol for an independent resolver to reconcile an actual semantic merge or rebase conflict between parallel contributions.
   Use only after the selected delivery path reaches that conflict, not because two tasks share a file.
-  Owns the independent resolver, verbatim-intent inputs, the three-class per-hunk taxonomy, the conflict-regions-only rule, and the resolution record.
+  Owns the independent resolver, verbatim-intent inputs, the three-class semantic-decision taxonomy, the conflict-regions-only rule, and the resolution record.
 user-invocable: false
 metadata:
   internal: true
@@ -30,9 +30,9 @@ Give that resolver both conflicting diffs and both intents verbatim.
 Intent means the contribution authors' own words from task instructions, PR bodies, or, only when neither is available, commit messages.
 A resolution based on diffs alone guesses at intent and is not arbitration.
 
-## Per-hunk taxonomy
+## Semantic-decision taxonomy
 
-Classify every conflicted hunk into exactly one class:
+Within every conflicted hunk, treat each question or independently intended change as a separate decision and classify each decision into exactly one class:
 
 - **disjoint-intent** - The contributions answer different questions in the same region, so combine both changes.
 - **same-question-different-answer** - The contributions answer the same question differently, so select the one answer better supported by the stated intents and do not synthesize an unrequested hybrid; if the intents genuinely tie and support incompatible answers, escalate for the captain's choice.
@@ -42,4 +42,4 @@ Classify every conflicted hunk into exactly one class:
 
 Change only conflict regions.
 Do not refactor, restyle, or improve non-conflicting code while resolving the conflict.
-Record every hunk's class, selected result, and intent evidence with the normal resolution or PR evidence.
+Record every decision's class, selected result, and intent evidence with the normal resolution or PR evidence.
