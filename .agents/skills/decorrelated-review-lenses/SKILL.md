@@ -1,9 +1,9 @@
 ---
 name: decorrelated-review-lenses
 description: >-
-  Agent-only protocol for keeping review verdicts independent across rounds and across parallel reviewers.
-  Use before commissioning a captain-authorized multi-round review and before fanning out parallel reviewers on the same artifact.
-  Owns the per-round lens sequence and the differentiated-brief rule for reviewer fan-out.
+  Agent-only protocol for keeping an independently authorized review's successive rounds or parallel reviewers meaningfully independent.
+  Use only while carrying out an authorized review or audit that actually has multiple rounds or reviewer fan-out.
+  Owns the optional lens sequence and differentiated-reviewer-brief rule without adding a delivery gate.
 user-invocable: false
 metadata:
   internal: true
@@ -11,29 +11,33 @@ metadata:
 
 # decorrelated-review-lenses
 
-Load this before commissioning a captain-authorized multi-round review, and before fanning out parallel reviewers on the same artifact.
-It governs how such a review is structured, never whether one is authorized: section 7 still owns when a separate review is allowed at all.
+Load this only while carrying out an independently authorized review or audit that actually has multiple rounds or reviewer fan-out.
+Task lifecycle section 7 owns whether that review is authorized.
+No-mistakes remains the sole owner of review, fixes, tests, documentation, push, PR, and CI when it is the selected delivery path.
 
-## The problem
+## Current-path fit
 
-Reviews repeated with the same lens produce correlated verdicts.
-Replaying round 1's lens at round 3 mostly rediscovers what round 1 already found, and identical briefs to parallel reviewers buy redundancy, not coverage.
-Decorrelate deliberately, on both axes.
+The older proposal described every lens as a required review round and every same-artifact fan-out as mandatory.
+That would stack a manual review gate onto no-mistakes or manufacture review work that was never authorized, so it is not retained.
+Use these lenses to diversify an already-authorized review's coverage.
+Do not require extra rounds, reviewer fan-out, or a manual clean verdict.
 
-## Per-round lenses
+## Successive-round lenses
 
-Give each successive round of the same review a different lens:
+When an authorized review has another round, assign it a lens that differs from the previous round:
 
-- **Round 1** - a cold read of the artifact itself, before reading the implementer's narrative, so the narrative cannot anchor the reviewer's first pass.
-- **Round 2** - real execution: run the artifact, its tests, or its reproduction rather than re-reading it.
-- **Round 3 and later** - a strict audit against the original contract: the intake requirements and acceptance criteria, not the implementation's own framing of them.
+- **cold read** - Read the artifact before the implementer's narrative, so that narrative cannot anchor the first pass.
+- **execution** - Exercise the artifact, its tests, or its reproduction rather than only rereading it.
+- **contract audit** - Compare the result to the original intake requirements and acceptance criteria rather than the implementation's framing.
 
-## Per-reviewer briefs in fan-out
+Choose the applicable lenses from the authorized review's scope instead of inventing rounds to exhaust the list.
 
-When several reviewers examine the same artifact in parallel, write each a DIFFERENT brief rather than copies of one brief:
+## Reviewer fan-out
 
-- **diff-only** - the reviewer sees the change alone and judges it on its own terms.
-- **full-context** - the reviewer sees the change with the surrounding code and history.
-- **checkout-and-run** - the reviewer checks the work out and exercises it for real.
+When an authorized review fans out reviewers over the same artifact, give them different briefs rather than copies:
 
-Identical briefs produce correlated verdicts; agreement between them is weaker evidence than agreement between decorrelated ones.
+- **diff-only** - Judge the change on its own terms.
+- **full-context** - Read the change with surrounding code and history.
+- **checkout-and-run** - Exercise the work in an isolated copy.
+
+Agreement from differentiated lenses is more informative than agreement from identical briefs.
