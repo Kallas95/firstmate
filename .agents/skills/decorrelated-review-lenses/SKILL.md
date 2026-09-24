@@ -3,7 +3,7 @@ name: decorrelated-review-lenses
 description: >-
   Agent-only protocol for keeping an independently authorized review's successive rounds or parallel reviewers meaningfully independent.
   Use only while carrying out an authorized review or audit that actually has multiple rounds or reviewer fan-out.
-  Owns the optional lens sequence and differentiated-reviewer-brief rule without adding a delivery gate.
+  Owns the successive-round lens sequence and differentiated-reviewer-brief rule without adding a delivery gate.
 user-invocable: false
 metadata:
   internal: true
@@ -24,13 +24,13 @@ Do not require extra rounds, reviewer fan-out, or a manual clean verdict.
 
 ## Successive-round lenses
 
-When an authorized review has another round, assign it a lens that differs from the previous round:
+Apply the lens assigned to each round that the authorized review actually has:
 
-- **cold read** - Read the artifact before the implementer's narrative, so that narrative cannot anchor the first pass.
-- **execution** - Exercise the artifact, its tests, or its reproduction rather than only rereading it.
-- **contract audit** - Compare the result to the original intake requirements and acceptance criteria rather than the implementation's framing.
+1. **Round 1: cold read** - Read the artifact before the implementer's narrative, so that narrative cannot anchor the first pass.
+2. **Round 2: execution** - Exercise the artifact, its tests, or its reproduction rather than only rereading it.
+3. **Round 3 and later: contract audit** - Compare the result to the original intake requirements and acceptance criteria rather than the implementation's framing.
 
-Choose the applicable lenses from the authorized review's scope instead of inventing rounds to exhaust the list.
+Do not invent rounds to exhaust the sequence.
 
 ## Reviewer fan-out
 
